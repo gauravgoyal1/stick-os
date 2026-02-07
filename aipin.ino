@@ -57,6 +57,24 @@ int scrollOffset = 0;
 #define LIST_TOP_Y 28
 
 // ==========================================
+//          AUDIO STREAMING CONFIG
+// ==========================================
+#define AUDIO_SAMPLE_RATE    16000
+#define AUDIO_BIT_DEPTH      16
+#define AUDIO_CHANNELS       1
+#define AUDIO_CHUNK_SAMPLES  512                          // samples per chunk
+#define AUDIO_CHUNK_BYTES    (AUDIO_CHUNK_SAMPLES * 2)    // 1024 bytes per chunk
+
+// Recording state
+bool isRecording = false;
+unsigned long recordStartMillis = 0;
+int16_t audioBuffer[AUDIO_CHUNK_SAMPLES];
+
+// Protocol magic bytes
+const uint8_t STREAM_START_MAGIC[4] = {0x41, 0x50, 0x53, 0x54}; // "APST"
+const uint8_t STREAM_STOP_MAGIC[4]  = {0x41, 0x50, 0x4E, 0x44}; // "APND"
+
+// ==========================================
 //          BT OBJECTS
 // ==========================================
 BluetoothSerial SerialBT;
@@ -277,7 +295,7 @@ void drawConnectedScreen() {
     StickCP2.Display.printf("RSSI: %d dBm", connDeviceRSSI);
     drawRSSIBars(140, y, connDeviceRSSI);
 
-    drawFooter("Disconnect", "---");
+    drawFooter("Record", "Disconnect");
 }
 
 // ==========================================
@@ -407,6 +425,17 @@ void connectToDevice(int index) {
 //        DISCONNECT
 // ==========================================
 void disconnectDevice() {
+    // If recording, stop mic and send stop marker before disconnecting
+    if (isRecording) {
+        isRecording = false;
+        while (StickCP2.Mic.isRecording()) { delay(1); }
+        StickCP2.Mic.end();
+        StickCP2.Speaker.begin();
+        StickCP2.Speaker.setVolume(120);
+        sendStreamStop();
+        delay(50);
+    }
+
     SerialBT.disconnect();
     isConnected = false;
 
@@ -426,6 +455,142 @@ void disconnectDevice() {
     delay(1200);
 
     startScan();
+}
+
+// ==========================================
+//        AUDIO STREAMING FUNCTIONS
+// ==========================================
+void sendStreamHeader() {
+    uint32_t sampleRate = AUDIO_SAMPLE_RATE;
+    uint16_t bitDepth   = AUDIO_BIT_DEPTH;
+    uint16_t channels   = AUDIO_CHANNELS;
+
+    SerialBT.write(STREAM_START_MAGIC, 4);
+    SerialBT.write((uint8_t*)&sampleRate, 4);
+    SerialBT.write((uint8_t*)&bitDepth, 2);
+    SerialBT.write((uint8_t*)&channels, 2);
+    SerialBT.flush();
+}
+
+void sendStreamStop() {
+    SerialBT.write(STREAM_STOP_MAGIC, 4);
+    SerialBT.flush();
+}
+
+// ==========================================
+//        RECORDING SCREEN
+// ==========================================
+void drawRecordingScreen() {
+    StickCP2.Display.fillScreen(C_BLACK);
+    drawHeader("RECORDING");
+
+    int y = LIST_TOP_Y;
+
+    // Device name
+    StickCP2.Display.setTextSize(1);
+    StickCP2.Display.setTextColor(C_GREEN);
+    StickCP2.Display.setCursor(6, y);
+    String dispName = connDeviceName;
+    if (dispName.length() > 24) dispName = dispName.substring(0, 22) + "..";
+    StickCP2.Display.print(dispName.c_str());
+    y += 14;
+
+    // Recording indicator: red filled circle + "REC"
+    StickCP2.Display.fillCircle(14, y + 4, 5, C_RED);
+    StickCP2.Display.setTextColor(C_RED);
+    StickCP2.Display.setCursor(24, y);
+    StickCP2.Display.print("REC");
+
+    // Duration timer placeholder
+    StickCP2.Display.setTextColor(C_WHITE);
+    StickCP2.Display.setCursor(54, y);
+    StickCP2.Display.print("00:00");
+    y += 14;
+
+    // Audio format info
+    StickCP2.Display.setTextColor(C_GRAY);
+    StickCP2.Display.setCursor(6, y);
+    StickCP2.Display.print("16kHz 16bit Mono | SPP");
+    y += 14;
+
+    // Streaming status
+    StickCP2.Display.setTextColor(C_CYAN);
+    StickCP2.Display.setCursor(6, y);
+    StickCP2.Display.print("Streaming to device...");
+
+    drawFooter("Stop", "Disconnect");
+}
+
+void updateRecordingTimer() {
+    unsigned long elapsed = (millis() - recordStartMillis) / 1000;
+    unsigned int mins = elapsed / 60;
+    unsigned int secs = elapsed % 60;
+
+    // Overwrite just the timer area
+    int timerY = LIST_TOP_Y + 14;
+    StickCP2.Display.fillRect(54, timerY, 40, 10, C_BLACK);
+    StickCP2.Display.setTextSize(1);
+    StickCP2.Display.setTextColor(C_WHITE);
+    StickCP2.Display.setCursor(54, timerY);
+    StickCP2.Display.printf("%02d:%02d", mins, secs);
+
+    // Blink the red recording dot
+    bool dotVisible = ((millis() / 500) % 2 == 0);
+    uint16_t dotColor = dotVisible ? C_RED : C_BLACK;
+    StickCP2.Display.fillCircle(14, timerY + 4, 5, dotColor);
+}
+
+// ==========================================
+//        RECORDING CONTROL
+// ==========================================
+void startRecording() {
+    // Stop speaker (shares GPIO 0 with mic)
+    StickCP2.Speaker.end();
+
+    // Start microphone
+    StickCP2.Mic.begin();
+    delay(50);
+
+    // Send stream start header over SPP
+    sendStreamHeader();
+
+    isRecording = true;
+    recordStartMillis = millis();
+
+    drawRecordingScreen();
+}
+
+void stopRecording() {
+    isRecording = false;
+
+    // Wait for any in-progress capture to finish
+    while (StickCP2.Mic.isRecording()) {
+        delay(1);
+    }
+
+    // Stop mic, restore speaker
+    StickCP2.Mic.end();
+    StickCP2.Speaker.begin();
+    StickCP2.Speaker.setVolume(120);
+
+    // Send stream stop marker
+    sendStreamStop();
+
+    // Confirmation tone
+    StickCP2.Speaker.tone(2000, 60);
+    delay(60);
+    StickCP2.Speaker.tone(1500, 60);
+
+    drawConnectedScreen();
+}
+
+void captureAndStreamChunk() {
+    if (!isRecording || !StickCP2.Mic.isEnabled()) return;
+
+    // record() fills buffer with AUDIO_CHUNK_SAMPLES samples at given sample rate
+    if (StickCP2.Mic.record(audioBuffer, AUDIO_CHUNK_SAMPLES, AUDIO_SAMPLE_RATE)) {
+        SerialBT.write((uint8_t*)audioBuffer, AUDIO_CHUNK_BYTES);
+    }
 }
 
 // ==========================================
@@ -494,7 +659,17 @@ void loop() {
         }
 
         case STATE_CONNECTED: {
+            // Check for lost connection
             if (!SerialBT.connected()) {
+                // If recording, clean up mic state
+                if (isRecording) {
+                    isRecording = false;
+                    while (StickCP2.Mic.isRecording()) { delay(1); }
+                    StickCP2.Mic.end();
+                    StickCP2.Speaker.begin();
+                    StickCP2.Speaker.setVolume(120);
+                }
+
                 isConnected = false;
                 StickCP2.Display.fillScreen(C_BLACK);
                 drawHeader("LOST CONNECTION");
@@ -516,9 +691,41 @@ void loop() {
                 break;
             }
 
-            // BtnA = disconnect
-            if (StickCP2.BtnA.wasPressed()) {
-                disconnectDevice();
+            if (isRecording) {
+                // Capture and stream one audio chunk
+                captureAndStreamChunk();
+
+                // Update timer display (throttled to once per second)
+                static unsigned long lastTimerUpdate = 0;
+                if (millis() - lastTimerUpdate > 1000) {
+                    updateRecordingTimer();
+                    lastTimerUpdate = millis();
+                }
+
+                // BtnA = stop recording
+                if (StickCP2.BtnA.wasPressed()) {
+                    stopRecording();
+                }
+
+                // BtnB = disconnect (stops recording first)
+                if (StickCP2.BtnB.wasPressed()) {
+                    stopRecording();
+                    delay(100);
+                    disconnectDevice();
+                }
+
+            } else {
+                // BtnA = start recording
+                if (StickCP2.BtnA.wasPressed()) {
+                    StickCP2.Speaker.tone(1500, 50);
+                    delay(50);
+                    startRecording();
+                }
+
+                // BtnB = disconnect
+                if (StickCP2.BtnB.wasPressed()) {
+                    disconnectDevice();
+                }
             }
 
             break;
@@ -528,5 +735,8 @@ void loop() {
             break;
     }
 
-    delay(20);
+    // Skip delay during recording — captureAndStreamChunk() already paces the loop
+    if (!isRecording) {
+        delay(20);
+    }
 }
