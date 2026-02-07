@@ -1,5 +1,6 @@
 #include <M5StickCPlus2.h>
 #include <WiFi.h>
+#include <time.h>
 
 // ==========================================
 //          WIFI CONFIGURATION
@@ -153,13 +154,17 @@ void drawFilterIcon(int x, int y, uint16_t color) {
     StickCP2.Display.fillRect(x + 3, y + 8, 5, 2, color);
 }
 
-void drawHeader(const char* title) {
+void drawHeader() {
     StickCP2.Display.fillRect(0, 0, SCREEN_W, 22, StickCP2.Display.color565(20, 20, 60));
     StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_CYAN);
-    StickCP2.Display.setCursor(6, 6);
-    StickCP2.Display.print(title);
 
+    // Time on the left
+    auto dt = StickCP2.Rtc.getDateTime();
+    StickCP2.Display.setTextColor(C_WHITE);
+    StickCP2.Display.setCursor(6, 6);
+    StickCP2.Display.printf("%02d:%02d", dt.time.hours, dt.time.minutes);
+
+    // Battery on the right
     int batt = StickCP2.Power.getBatteryLevel();
     StickCP2.Display.setCursor(100, 6);
     if (batt > 50) StickCP2.Display.setTextColor(C_GREEN);
@@ -237,6 +242,43 @@ bool connectToServer() {
 }
 
 // ==========================================
+//        NTP TIME SYNC
+// ==========================================
+void syncNTPTime() {
+    Serial.println("[AiPin] Syncing NTP time...");
+    configTime(19800, 0, "time.google.com", "pool.ntp.org");
+    delay(2000);
+
+    struct tm timeinfo = { 0 };
+    int attempts = 0;
+    bool success = false;
+
+    while (attempts < 10 && !success) {
+        if (getLocalTime(&timeinfo, 2000)) {
+            if (timeinfo.tm_year + 1900 >= 2024) {
+                success = true;
+            }
+        }
+        attempts++;
+        delay(500);
+    }
+
+    if (success) {
+        m5::rtc_datetime_t dt;
+        dt.date.year = timeinfo.tm_year + 1900;
+        dt.date.month = timeinfo.tm_mon + 1;
+        dt.date.date = timeinfo.tm_mday;
+        dt.time.hours = timeinfo.tm_hour;
+        dt.time.minutes = timeinfo.tm_min;
+        dt.time.seconds = timeinfo.tm_sec;
+        StickCP2.Rtc.setDateTime(dt);
+        Serial.printf("[AiPin] Time synced: %02d:%02d\n", timeinfo.tm_hour, timeinfo.tm_min);
+    } else {
+        Serial.println("[AiPin] NTP sync failed");
+    }
+}
+
+// ==========================================
 //        DISCONNECTED SCREEN
 // ==========================================
 void drawLargeWiFiIcon(int cx, int cy, uint16_t color) {
@@ -263,7 +305,7 @@ void drawSlash(int cx, int cy, int size, uint16_t color) {
 
 void drawDisconnectedScreen(int reason) {
     StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("AiPin");
+    drawHeader();
 
     int cx = SCREEN_W / 2;
 
@@ -308,7 +350,7 @@ void drawDisconnectedScreen(int reason) {
 // ==========================================
 void drawConnectedScreen() {
     StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("AiPin");
+    drawHeader();
 
     int cx = SCREEN_W / 2;
 
@@ -322,20 +364,25 @@ void drawConnectedScreen() {
     // "Ready"
     StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(cx - 30, 102);
+    StickCP2.Display.setCursor(cx - 30, 100);
     StickCP2.Display.print("Ready");
 
-    // WiFi SSID
+    // "Press to Record"
     StickCP2.Display.setTextSize(1);
     StickCP2.Display.setTextColor(C_GRAY);
+    StickCP2.Display.setCursor(cx - 42, 122);
+    StickCP2.Display.print("Press to Record");
+
+    // WiFi SSID
     String ssid = WiFi.SSID();
     if (ssid.length() > 20) ssid = ssid.substring(0, 18) + "..";
     int nameW = ssid.length() * 6;
-    StickCP2.Display.setCursor(cx - nameW / 2, 130);
+    StickCP2.Display.setTextColor(C_DARKGRAY);
+    StickCP2.Display.setCursor(cx - nameW / 2, 140);
     StickCP2.Display.print(ssid.c_str());
 
     // Signal bars
-    drawWiFiBars(cx - 6, 148, WiFi.RSSI());
+    drawWiFiBars(cx - 6, 156, WiFi.RSSI());
 
     drawFooter("Rec", "Disc");
 }
@@ -435,12 +482,12 @@ void drawWaveform() {
 
 void drawRecordingScreen() {
     StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("REC");
+    drawHeader();
 
     int cx = SCREEN_W / 2;
 
-    // Red recording dot in header
-    StickCP2.Display.fillCircle(32, 11, 3, C_RED);
+    // Red recording dot in header (after time)
+    StickCP2.Display.fillCircle(42, 7, 3, C_RED);
 
     // Duration timer
     StickCP2.Display.setTextSize(2);
@@ -471,7 +518,7 @@ void updateRecordingDisplay() {
     // Blink recording dot in header
     bool dotVisible = ((millis() / 500) % 2 == 0);
     uint16_t headerBg = StickCP2.Display.color565(20, 20, 60);
-    StickCP2.Display.fillCircle(32, 11, 3, dotVisible ? C_RED : headerBg);
+    StickCP2.Display.fillCircle(42, 7, 3, dotVisible ? C_RED : headerBg);
 
     // Update waveform
     drawWaveform();
@@ -637,9 +684,13 @@ void setup() {
     // Connect to WiFi
     WiFi.mode(WIFI_STA);
     isWiFiConnected = connectToWiFi();
-    
+
     if (isWiFiConnected) {
         StickCP2.Display.setCursor(13, 155);
+        StickCP2.Display.print("Syncing time...");
+        syncNTPTime();
+
+        StickCP2.Display.setCursor(13, 170);
         StickCP2.Display.print("Connecting server...");
         isServerConnected = connectToServer();
         
