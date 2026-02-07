@@ -38,13 +38,17 @@ bool isRecording = false;
 unsigned long recordStartMillis = 0;
 int16_t audioBuffer[AUDIO_CHUNK_SAMPLES];
 
-// Noise reduction settings
-#define NOISE_GATE_THRESHOLD  150   // Suppress samples below this absolute value
-#define HPF_ALPHA            0.95   // High-pass filter coefficient (0.95 = ~100Hz cutoff at 16kHz)
+// Audio processing settings — tuned for speech transcription (Whisper, etc.)
+// Voice fundamentals: 85–255 Hz | Consonants/sibilants: up to 5 kHz
+#define AUDIO_GAIN           35.0   // Moderate gain — enough signal without amplifying too much noise
+#define NOISE_GATE_THRESHOLD 200    // Light gate — mutes silence hiss but won't clip quiet speech
+#define HPF_ALPHA           0.97    // ~75 Hz cutoff — removes DC/rumble, preserves male fundamentals
+#define LPF_ALPHA           0.45    // ~5 kHz cutoff — keeps consonants, cuts PDM mic hiss above voice band
+
+// Filter state variables (separate for left/right channel support)
 float hpf_prev_input = 0.0;
 float hpf_prev_output = 0.0;
-int32_t dc_offset_accumulator = 0;
-int dc_offset_samples = 0;
+float lpf_prev_output = 0.0;
 
 // Protocol magic bytes
 const uint8_t STREAM_START_MAGIC[4] = {0x41, 0x50, 0x53, 0x54}; // "APST"
@@ -214,30 +218,40 @@ void drawConnectedScreen() {
 //        AUDIO PROCESSING FUNCTIONS
 // ==========================================
 void processAudioBuffer(int16_t* buffer, size_t samples) {
-    // Apply noise reduction processing to the audio buffer
+    // Multi-stage audio processing pipeline for voice enhancement
+    // Pipeline: Gain → HPF (DC removal) → LPF (noise reduction) → Noise Gate → Clip
 
     for (size_t i = 0; i < samples; i++) {
-        float input = (float)buffer[i];
+        float sample = (float)buffer[i];
 
-        // 1. DC offset removal using high-pass filter (1st order IIR)
-        //    y[n] = alpha * (y[n-1] + x[n] - x[n-1])
-        //    This removes low-frequency drift and DC bias
-        float hpf_output = HPF_ALPHA * (hpf_prev_output + input - hpf_prev_input);
-        hpf_prev_input = input;
+        // Stage 1: Software amplification
+        // The SPM1423 PDM mic has low output — boost by AUDIO_GAIN (50-100x)
+        sample *= AUDIO_GAIN;
+
+        // Stage 2: High-pass filter (1st order IIR) — removes DC offset and low-frequency rumble
+        // y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+        // Cutoff: ~75Hz at 16kHz sample rate (alpha=0.97)
+        float hpf_output = HPF_ALPHA * (hpf_prev_output + sample - hpf_prev_input);
+        hpf_prev_input = sample;
         hpf_prev_output = hpf_output;
 
-        // 2. Noise gate: suppress very quiet samples to reduce background hiss
-        //    If the absolute value is below threshold, set to zero
-        if (abs((int16_t)hpf_output) < NOISE_GATE_THRESHOLD) {
-            hpf_output = 0;
+        // Stage 3: Low-pass filter (1st order IIR) — removes high-frequency noise
+        // y[n] = alpha * x[n] + (1 - alpha) * y[n-1]
+        // Cutoff: ~3kHz at 16kHz sample rate (alpha=0.15) — voice band
+        float lpf_output = LPF_ALPHA * hpf_output + (1.0 - LPF_ALPHA) * lpf_prev_output;
+        lpf_prev_output = lpf_output;
+
+        // Stage 4: Noise gate — suppress very quiet samples to reduce background hiss
+        if (fabs(lpf_output) < NOISE_GATE_THRESHOLD) {
+            lpf_output = 0;
         }
 
-        // 3. Write processed sample back to buffer
-        //    Clamp to int16_t range to prevent overflow
-        int32_t processed = (int32_t)hpf_output;
-        if (processed > 32767) processed = 32767;
-        if (processed < -32768) processed = -32768;
-        buffer[i] = (int16_t)processed;
+        // Stage 5: Hard clipping to prevent int16_t overflow
+        int32_t final_sample = (int32_t)lpf_output;
+        if (final_sample > 32767) final_sample = 32767;
+        if (final_sample < -32768) final_sample = -32768;
+
+        buffer[i] = (int16_t)final_sample;
     }
 }
 
@@ -349,11 +363,10 @@ void startRecording() {
     StickCP2.Mic.begin();
     delay(50);
 
-    // Reset noise reduction filter state
+    // Reset audio processing filter state
     hpf_prev_input = 0.0;
     hpf_prev_output = 0.0;
-    dc_offset_accumulator = 0;
-    dc_offset_samples = 0;
+    lpf_prev_output = 0.0;
 
     // Send stream start header over SPP
     sendStreamHeader();

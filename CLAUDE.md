@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AiPin is a Bluetooth device scanner, connection manager, and **audio streamer** for the **M5StickC Plus 2** (ESP32-based microcontroller). It discovers Classic Bluetooth devices, displays them in a scrollable list, connects via SPP, and can record audio from the built-in microphone and stream it to the connected device.
+AiPin is a Bluetooth **audio streamer** for the **M5StickC Plus 2** (ESP32-based microcontroller). It runs in BT slave mode, advertising as "AiPin" and waiting for a Mac to connect via SPP. Once connected, it records audio from the built-in microphone and streams it over Bluetooth to the Mac.
 
 ## Build & Upload Commands
 

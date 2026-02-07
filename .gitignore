@@ -11,11 +11,12 @@ Thumbs.db
 
 # Python virtual environment
 venv/
-
-# Recorded audio files
-*.wav
+recordings/
 
 # IDE files
 *.swp
 *.swo
 *~
+
+# Claude files
+.claude/

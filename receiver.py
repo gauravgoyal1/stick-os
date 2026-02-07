@@ -193,8 +193,8 @@ def main():
                         help='List available serial ports and exit')
     parser.add_argument('--baud', '-b', type=int, default=115200,
                         help='Baud rate (default: 115200)')
-    parser.add_argument('--continuous', '-c', action='store_true',
-                        help='Keep listening for multiple recordings')
+    parser.add_argument('--once', action='store_true',
+                        help='Exit after first recording (default: keep listening)')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable debug logging')
     args = parser.parse_args()
@@ -213,8 +213,11 @@ def main():
         sys.exit(1)
 
     if not args.output:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        args.output = f'aipin_{timestamp}.wav'
+        args.output = 'recordings/'
+    output_dir = None
+    if Path(args.output).is_dir() or args.output.endswith('/'):
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Opening serial port: {args.port}")
     try:
@@ -247,17 +250,16 @@ def main():
             sample_rate, bit_depth, channels = header
             print(f"Header received: {sample_rate}Hz, {bit_depth}-bit, {channels}ch")
 
-            if args.continuous and recording_count > 0:
-                base = Path(args.output).stem
-                ext = Path(args.output).suffix
-                output_path = Path(f"{base}_{recording_count}{ext}")
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            if output_dir:
+                output_path = output_dir / f'aipin_{timestamp}.wav'
             else:
                 output_path = Path(args.output)
 
             receive_audio(ser, sample_rate, bit_depth, channels, output_path)
             recording_count += 1
 
-            if not args.continuous:
+            if args.once:
                 break
 
             print("\nWaiting for next recording...")
