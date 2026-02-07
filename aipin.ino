@@ -25,25 +25,29 @@ void initColors() {
 // ==========================================
 //          AUDIO STREAMING CONFIG
 // ==========================================
-#define AUDIO_SAMPLE_RATE    16000
-#define AUDIO_BIT_DEPTH      16
+#define AUDIO_SAMPLE_RATE    8000      // Standard "Telephone Quality" (stable on Bluetooth)
+#define AUDIO_BIT_DEPTH      8         // 8-bit to save 50% bandwidth
 #define AUDIO_CHANNELS       1
-#define AUDIO_CHUNK_SAMPLES  512                          // samples per chunk
-#define AUDIO_CHUNK_BYTES    (AUDIO_CHUNK_SAMPLES * 2)    // 1024 bytes per chunk
+#define AUDIO_CHUNK_SAMPLES  1024      // Larger buffer = fewer transmission interruptions
+#define AUDIO_CHUNK_BYTES    (AUDIO_CHUNK_SAMPLES * 1)  // 1 byte per sample now
 
 #define LIST_TOP_Y 28
 
 // Recording state
 bool isRecording = false;
 unsigned long recordStartMillis = 0;
-int16_t audioBuffer[AUDIO_CHUNK_SAMPLES];
+// Note: mic captures 16-bit natively; we downsample to 8-bit in captureAndStreamChunk()
 
-// Audio processing settings — tuned for speech transcription (Whisper, etc.)
+// Audio processing settings — tunable at runtime via Serial commands
 // Voice fundamentals: 85–255 Hz | Consonants/sibilants: up to 5 kHz
-#define AUDIO_GAIN           35.0   // Moderate gain — enough signal without amplifying too much noise
-#define NOISE_GATE_THRESHOLD 200    // Light gate — mutes silence hiss but won't clip quiet speech
-#define HPF_ALPHA           0.97    // ~75 Hz cutoff — removes DC/rumble, preserves male fundamentals
-#define LPF_ALPHA           0.45    // ~5 kHz cutoff — keeps consonants, cuts PDM mic hiss above voice band
+// Target: -12dB to -6dB peaks (~8000-15000 amplitude)
+// Serial commands: gain <val> | gate <val> | hpf <val> | lpf <val> | knee <val> | ratio <val> | audio
+float audioGain       = 20.0;    // Lowered from 90.0 to prevent clipping
+float noiseGateThresh = 200.0;   // Lowered from 800.0 to match new gain
+float hpfAlpha        = 0.90;    // Slightly less aggressive high pass (was 0.97)
+float lpfAlpha        = 0.30;    // Stronger low pass to remove digital whine (was 0.45)
+float softClipKnee    = 25000.0; // Start compressing a bit earlier (was 28000.0)
+float softClipRatio   = 0.5;     // Less aggressive compression (was 0.3)
 
 // Filter state variables (separate for left/right channel support)
 float hpf_prev_input = 0.0;
@@ -225,31 +229,33 @@ void processAudioBuffer(int16_t* buffer, size_t samples) {
         float sample = (float)buffer[i];
 
         // Stage 1: Software amplification
-        // The SPM1423 PDM mic has low output — boost by AUDIO_GAIN (50-100x)
-        sample *= AUDIO_GAIN;
+        sample *= audioGain;
 
         // Stage 2: High-pass filter (1st order IIR) — removes DC offset and low-frequency rumble
         // y[n] = alpha * (y[n-1] + x[n] - x[n-1])
-        // Cutoff: ~75Hz at 16kHz sample rate (alpha=0.97)
-        float hpf_output = HPF_ALPHA * (hpf_prev_output + sample - hpf_prev_input);
+        float hpf_output = hpfAlpha * (hpf_prev_output + sample - hpf_prev_input);
         hpf_prev_input = sample;
         hpf_prev_output = hpf_output;
 
         // Stage 3: Low-pass filter (1st order IIR) — removes high-frequency noise
         // y[n] = alpha * x[n] + (1 - alpha) * y[n-1]
-        // Cutoff: ~3kHz at 16kHz sample rate (alpha=0.15) — voice band
-        float lpf_output = LPF_ALPHA * hpf_output + (1.0 - LPF_ALPHA) * lpf_prev_output;
+        float lpf_output = lpfAlpha * hpf_output + (1.0 - lpfAlpha) * lpf_prev_output;
         lpf_prev_output = lpf_output;
 
         // Stage 4: Noise gate — suppress very quiet samples to reduce background hiss
-        if (fabs(lpf_output) < NOISE_GATE_THRESHOLD) {
+        if (fabs(lpf_output) < noiseGateThresh) {
             lpf_output = 0;
         }
 
-        // Stage 5: Hard clipping to prevent int16_t overflow
-        int32_t final_sample = (int32_t)lpf_output;
-        if (final_sample > 32767) final_sample = 32767;
-        if (final_sample < -32768) final_sample = -32768;
+        // Stage 5: Soft clipping — compress peaks above knee for natural limiting
+        float clipped = lpf_output;
+        if (clipped > softClipKnee)
+            clipped = softClipKnee + (clipped - softClipKnee) * softClipRatio;
+        else if (clipped < -softClipKnee)
+            clipped = -softClipKnee + (clipped + softClipKnee) * softClipRatio;
+
+        // Stage 6: Hard clipping to prevent int16_t overflow
+        int32_t final_sample = constrain((int32_t)clipped, -32768, 32767);
 
         buffer[i] = (int16_t)final_sample;
     }
@@ -407,18 +413,30 @@ static int chunkCount = 0;
 void captureAndStreamChunk() {
     if (!isRecording || !StickCP2.Mic.isEnabled()) return;
 
-    // record() starts async DMA capture — must wait for completion before reading buffer
-    if (StickCP2.Mic.record(audioBuffer, AUDIO_CHUNK_SAMPLES, AUDIO_SAMPLE_RATE)) {
-        while (StickCP2.Mic.isRecording()) { delay(1); }
+    // 1. Record 16-bit audio as usual (StickCP2 mic is natively 16-bit)
+    int16_t tempBuffer[AUDIO_CHUNK_SAMPLES];
 
-        // Apply noise reduction processing before streaming
-        processAudioBuffer(audioBuffer, AUDIO_CHUNK_SAMPLES);
+    if (StickCP2.Mic.record(tempBuffer, AUDIO_CHUNK_SAMPLES, AUDIO_SAMPLE_RATE)) {
 
-        size_t written = SerialBT.write((uint8_t*)audioBuffer, AUDIO_CHUNK_BYTES);
+        // 2. Process Audio (Gain, Noise Gate, etc.)
+        processAudioBuffer(tempBuffer, AUDIO_CHUNK_SAMPLES);
+
+        // 3. Compress to 8-bit (High Byte Only)
+        // This discards the fine detail but keeps the core audio, reducing data by 50%
+        int8_t txBuffer[AUDIO_CHUNK_SAMPLES];
+        for (int i = 0; i < AUDIO_CHUNK_SAMPLES; i++) {
+            // Take the top 8 bits of the 16-bit sample
+            txBuffer[i] = (int8_t)(tempBuffer[i] >> 8);
+        }
+
+        // 4. Send the smaller 8-bit packet
+        size_t written = SerialBT.write((uint8_t*)txBuffer, AUDIO_CHUNK_SAMPLES);
+
+        // Debug logging
         chunkCount++;
         if (millis() - lastChunkLog > 2000) {
-            Serial.printf("[AiPin] chunks=%d last_write=%d/%d connected=%d\n",
-                          chunkCount, written, AUDIO_CHUNK_BYTES, SerialBT.connected());
+            Serial.printf("[AiPin] chunks=%d last_write=%d/%d\n",
+                          chunkCount, written, AUDIO_CHUNK_SAMPLES);
             lastChunkLog = millis();
         }
     }
@@ -515,10 +533,54 @@ void setup() {
 }
 
 // ==========================================
+//        SERIAL COMMAND INTERFACE
+// ==========================================
+// Tune audio parameters at runtime via Serial Monitor (no reflash needed).
+// Commands: gain <val> | gate <val> | hpf <val> | lpf <val> | knee <val> | ratio <val> | audio
+String serialCmdBuf = "";
+
+void handleSerialCommands() {
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\n' || c == '\r') {
+            serialCmdBuf.trim();
+            if (serialCmdBuf.length() > 0) {
+                processSerialCommand(serialCmdBuf);
+                serialCmdBuf = "";
+            }
+        } else {
+            serialCmdBuf += c;
+        }
+    }
+}
+
+void processSerialCommand(const String& cmd) {
+    int spaceIdx = cmd.indexOf(' ');
+    String key = (spaceIdx > 0) ? cmd.substring(0, spaceIdx) : cmd;
+    float val  = (spaceIdx > 0) ? cmd.substring(spaceIdx + 1).toFloat() : 0;
+
+    if (key == "gain")       { audioGain = val; }
+    else if (key == "gate")  { noiseGateThresh = val; }
+    else if (key == "hpf")   { hpfAlpha = val; }
+    else if (key == "lpf")   { lpfAlpha = val; }
+    else if (key == "knee")  { softClipKnee = val; }
+    else if (key == "ratio") { softClipRatio = val; }
+    else if (key == "audio") { /* just print */ }
+    else {
+        Serial.println("[AiPin] Unknown command. Try: gain|gate|hpf|lpf|knee|ratio|audio");
+        return;
+    }
+
+    Serial.printf("[AiPin] Audio settings: gain=%.1f gate=%.0f hpf=%.3f lpf=%.3f knee=%.0f ratio=%.2f\n",
+                  audioGain, noiseGateThresh, hpfAlpha, lpfAlpha, softClipKnee, softClipRatio);
+}
+
+// ==========================================
 //              MAIN LOOP
 // ==========================================
 void loop() {
     StickCP2.update();
+    handleSerialCommands();
 
     // Detect Mac connecting via SPP
     if (!isConnected && SerialBT.connected()) {

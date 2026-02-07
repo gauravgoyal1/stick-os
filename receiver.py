@@ -168,6 +168,11 @@ def receive_audio(ser, sample_rate, bit_depth, channels, output_path):
 
     duration = len(pcm_data) / (sample_rate * sample_width * channels)
 
+    # WAV 8-bit format requires unsigned samples (0-255, center=128).
+    # Firmware sends signed int8 (-128 to 127), so convert before writing.
+    if bit_depth == 8:
+        pcm_data = bytearray((b + 128) & 0xFF for b in pcm_data)
+
     print(f"Writing WAV file: {output_path}")
     print(f"  Duration: {duration:.2f}s")
     print(f"  Data size: {len(pcm_data):,} bytes")
