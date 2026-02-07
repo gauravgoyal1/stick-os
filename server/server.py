@@ -339,10 +339,10 @@ def main():
                         help='Host to bind to (default: 0.0.0.0)')
     parser.add_argument('--port', '-p', type=int, default=8765,
                         help='Port to listen on (default: 8765)')
-    parser.add_argument('--output', '-o', default='../recordings',
-                        help='Output directory for WAV files (default: ../recordings)')
-    parser.add_argument('--transcripts', '-t', default='../transcripts',
-                        help='Output directory for transcripts (default: ../transcripts)')
+    parser.add_argument('--output', '-o', default='recordings',
+                        help='Output directory for WAV files (default: recordings)')
+    parser.add_argument('--transcripts', '-t', default='transcripts',
+                        help='Output directory for transcripts (default: transcripts)')
     parser.add_argument('--no-transcribe', action='store_true',
                         help='Skip Gemini transcription')
     parser.add_argument('--verbose', '-v', action='store_true',
