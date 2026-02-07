@@ -1,5 +1,6 @@
 #include <M5StickCPlus2.h>
 #include <BluetoothSerial.h>
+#include <Preferences.h>
 
 // ==========================================
 //          DISPLAY CONFIGURATION
@@ -29,7 +30,8 @@ enum AppState {
     STATE_SCANNING,
     STATE_SCAN_RESULTS,
     STATE_CONNECTING,
-    STATE_CONNECTED
+    STATE_CONNECTED,
+    STATE_RECONNECTING
 };
 
 AppState currentState = STATE_SCANNING;
@@ -78,6 +80,12 @@ const uint8_t STREAM_STOP_MAGIC[4]  = {0x41, 0x50, 0x4E, 0x44}; // "APND"
 //          BT OBJECTS
 // ==========================================
 BluetoothSerial SerialBT;
+Preferences preferences;
+
+// Saved device for auto-reconnect (persisted in NVS)
+String savedDeviceAddr = "";
+String savedDeviceName = "";
+uint32_t savedDeviceCOD = 0;
 
 // Connection state
 bool isConnected = false;
@@ -260,6 +268,65 @@ void showConnectingScreen(const char* name) {
 }
 
 // ==========================================
+//        RECONNECTING SCREEN
+// ==========================================
+void drawReconnectingScreen() {
+    StickCP2.Display.fillScreen(C_BLACK);
+    drawHeader("RECONNECTING");
+
+    StickCP2.Display.setTextSize(1);
+    int y = LIST_TOP_Y;
+
+    // Saved device name
+    StickCP2.Display.setTextColor(C_GREEN);
+    StickCP2.Display.setCursor(6, y);
+    String dispName = savedDeviceName;
+    if (dispName.length() > 28) dispName = dispName.substring(0, 26) + "..";
+    StickCP2.Display.print(dispName.c_str());
+    y += 16;
+
+    // Address
+    StickCP2.Display.setTextColor(C_GRAY);
+    StickCP2.Display.setCursor(6, y);
+    StickCP2.Display.print(savedDeviceAddr.c_str());
+    y += 20;
+
+    // Status
+    StickCP2.Display.setTextColor(C_YELLOW);
+    StickCP2.Display.setCursor(6, y);
+    StickCP2.Display.print("Connecting...");
+
+    drawFooter("Scan", "---");
+}
+
+// ==========================================
+//        RECONNECT LOGIC
+// ==========================================
+bool attemptReconnect() {
+    uint8_t addr[6];
+    addrStringToBytes(savedDeviceAddr, addr);
+
+    bool connected = SerialBT.connect(addr);
+
+    if (connected) {
+        isConnected = true;
+        connDeviceName = savedDeviceName;
+        connDeviceAddr = savedDeviceAddr;
+        connDeviceClassStr = getDeviceClassName(savedDeviceCOD);
+        connDeviceRSSI = 0;
+        currentState = STATE_CONNECTED;
+
+        StickCP2.Speaker.tone(1500, 80);
+        delay(80);
+        StickCP2.Speaker.tone(2000, 80);
+
+        drawConnectedScreen();
+        return true;
+    }
+    return false;
+}
+
+// ==========================================
 //        CONNECTED DETAILS SCREEN
 // ==========================================
 void drawConnectedScreen() {
@@ -304,6 +371,37 @@ void drawConnectedScreen() {
 void addrStringToBytes(const String& str, uint8_t* addr) {
     sscanf(str.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
            &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5]);
+}
+
+// ==========================================
+//        NVS PERSISTENCE
+// ==========================================
+void saveLastDevice(const String& addr, const String& name, uint32_t cod) {
+    preferences.begin("aipin", false);
+    preferences.putString("lastAddr", addr);
+    preferences.putString("lastName", name);
+    preferences.putUInt("lastCOD", cod);
+    preferences.end();
+}
+
+bool loadLastDevice() {
+    preferences.begin("aipin", true);
+    savedDeviceAddr = preferences.getString("lastAddr", "");
+    savedDeviceName = preferences.getString("lastName", "");
+    savedDeviceCOD = preferences.getUInt("lastCOD", 0);
+    preferences.end();
+    return savedDeviceAddr.length() > 0;
+}
+
+void clearLastDevice() {
+    preferences.begin("aipin", false);
+    preferences.remove("lastAddr");
+    preferences.remove("lastName");
+    preferences.remove("lastCOD");
+    preferences.end();
+    savedDeviceAddr = "";
+    savedDeviceName = "";
+    savedDeviceCOD = 0;
 }
 
 // ==========================================
@@ -386,6 +484,9 @@ void connectToDevice(int index) {
     if (connected) {
         isConnected = true;
         currentState = STATE_CONNECTED;
+
+        // Persist for auto-reconnect
+        saveLastDevice(connDeviceAddr, connDeviceName, devices[index].cod);
 
         StickCP2.Speaker.tone(1500, 80);
         delay(80);
@@ -587,8 +688,9 @@ void stopRecording() {
 void captureAndStreamChunk() {
     if (!isRecording || !StickCP2.Mic.isEnabled()) return;
 
-    // record() fills buffer with AUDIO_CHUNK_SAMPLES samples at given sample rate
+    // record() starts async DMA capture — must wait for completion before reading buffer
     if (StickCP2.Mic.record(audioBuffer, AUDIO_CHUNK_SAMPLES, AUDIO_SAMPLE_RATE)) {
+        while (StickCP2.Mic.isRecording()) { delay(1); }
         SerialBT.write((uint8_t*)audioBuffer, AUDIO_CHUNK_BYTES);
     }
 }
@@ -623,7 +725,13 @@ void setup() {
     // Initialize Classic BT in master mode (allows scanning + connecting)
     SerialBT.begin("AiPin", true);
 
-    startScan();
+    // Try to reconnect to last device, or scan if none saved
+    if (loadLastDevice()) {
+        currentState = STATE_RECONNECTING;
+        drawReconnectingScreen();
+    } else {
+        startScan();
+    }
 }
 
 // ==========================================
@@ -633,6 +741,32 @@ void loop() {
     StickCP2.update();
 
     switch (currentState) {
+
+        case STATE_RECONNECTING: {
+            // Give user 1.5s window to press BtnA to skip to scan
+            unsigned long reconnStart = millis();
+            bool skipped = false;
+            while (millis() - reconnStart < 1500) {
+                StickCP2.update();
+                if (StickCP2.BtnA.wasPressed()) { skipped = true; break; }
+                delay(20);
+            }
+            if (skipped) {
+                StickCP2.Speaker.tone(1000, 50);
+                startScan();
+                break;
+            }
+
+            // Attempt reconnect (blocking)
+            if (attemptReconnect()) {
+                // Success — now in STATE_CONNECTED
+            } else {
+                // Failed — fall back to scan
+                StickCP2.Speaker.tone(300, 100);
+                startScan();
+            }
+            break;
+        }
 
         case STATE_SCAN_RESULTS: {
             if (deviceCount == 0) {
@@ -671,22 +805,18 @@ void loop() {
                 }
 
                 isConnected = false;
-                StickCP2.Display.fillScreen(C_BLACK);
-                drawHeader("LOST CONNECTION");
-                StickCP2.Display.setTextSize(1);
-                StickCP2.Display.setTextColor(C_RED);
-                StickCP2.Display.setCursor(30, 55);
-                StickCP2.Display.print("Device disconnected.");
-                StickCP2.Display.setTextColor(C_WHITE);
-                StickCP2.Display.setCursor(30, 80);
-                StickCP2.Display.print("Press A to rescan");
                 StickCP2.Speaker.tone(300, 200);
 
-                while (true) {
-                    StickCP2.update();
-                    if (StickCP2.BtnA.wasPressed()) break;
-                    delay(20);
+                // Auto-reconnect to saved device
+                if (savedDeviceAddr.length() > 0) {
+                    drawReconnectingScreen();
+                    delay(500);
+                    if (attemptReconnect()) {
+                        break;  // Successfully reconnected
+                    }
                 }
+
+                // Reconnect failed or no saved device — scan
                 startScan();
                 break;
             }

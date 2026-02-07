@@ -7,6 +7,7 @@ Bluetooth device scanner, connection manager, and audio streamer for the **M5Sti
 - **Scan** for Classic Bluetooth devices (5-second discovery)
 - **Browse** results in a scrollable list sorted by signal strength
 - **Connect** to any device via SPP (Serial Port Profile)
+- **Auto-reconnect** to the last connected device on boot and after connection loss
 - **Record & stream** audio from the built-in microphone to the connected device
 - **Save** streamed audio as `.wav` on your Mac
 
@@ -29,6 +30,7 @@ arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbs
 
 | Screen | BtnA | BtnB |
 |--------|------|------|
+| Reconnecting | Skip to Scan | --- |
 | Scan Results | Connect | Next device |
 | Connected | Record | Disconnect |
 | Recording | Stop | Disconnect |
@@ -61,6 +63,7 @@ python receiver.py --list                  # List serial ports
 python receiver.py -p PORT                 # Auto-timestamped output
 python receiver.py -p PORT -o file.wav     # Named output
 python receiver.py -p PORT --continuous    # Multiple recordings
+python receiver.py -p PORT --verbose       # Debug logging
 ```
 
 ## Requirements

@@ -11,12 +11,15 @@ Usage:
 """
 
 import argparse
+import logging
 import struct
 import sys
 import time
 import wave
 from datetime import datetime
 from pathlib import Path
+
+log = logging.getLogger("aipin")
 
 try:
     import serial
@@ -48,21 +51,46 @@ def wait_for_header(ser):
     """
     print("Waiting for audio stream from AiPin...")
     buf = b''
+    total_bytes_seen = 0
+    last_status = time.time()
+    last_data_time = None
+    timeouts = 0
     while True:
         byte = ser.read(1)
         if not byte:
+            timeouts += 1
+            now = time.time()
+            if now - last_status >= 5:
+                elapsed = now - last_status
+                log.debug(f"Still waiting... {total_bytes_seen} bytes received so far, "
+                          f"{timeouts} read timeouts in last {elapsed:.0f}s")
+                if total_bytes_seen == 0:
+                    log.debug("No data received yet — is the device connected and streaming?")
+                    log.debug(f"  Port: {ser.port}, DSR={ser.dsr}, CTS={ser.cts}")
+                last_status = now
+                timeouts = 0
             continue
+        total_bytes_seen += 1
+        if last_data_time is None:
+            log.debug(f"First byte received: 0x{byte[0]:02x}")
+        last_data_time = time.time()
         buf += byte
         if len(buf) > 256:
             buf = buf[-4:]
+        if total_bytes_seen <= 20:
+            log.debug(f"  byte #{total_bytes_seen}: 0x{byte[0]:02x} "
+                      f"({chr(byte[0]) if 32 <= byte[0] < 127 else '.'})")
         if buf[-4:] == START_MAGIC:
+            log.debug(f"Start magic found after {total_bytes_seen} bytes")
             rest = ser.read(8)
             if len(rest) < 8:
                 print("Error: incomplete header received.")
+                log.debug(f"  Only got {len(rest)} of 8 header bytes: {rest.hex()}")
                 return None
             sample_rate = struct.unpack('<I', rest[0:4])[0]
             bit_depth = struct.unpack('<H', rest[4:6])[0]
             channels = struct.unpack('<H', rest[6:8])[0]
+            log.debug(f"Header parsed: rate={sample_rate}, bits={bit_depth}, ch={channels}")
             return sample_rate, bit_depth, channels
 
 
@@ -83,26 +111,42 @@ def receive_audio(ser, sample_rate, bit_depth, channels, output_path):
     print("Receiving audio data... (press Ctrl+C to force stop)")
 
     start_time = time.time()
+    chunks_received = 0
+    empty_reads = 0
+    last_data_time = time.time()
 
     try:
         while True:
             data = ser.read(chunk_size)
             if not data:
+                empty_reads += 1
+                gap = time.time() - last_data_time
+                if gap > 3:
+                    log.debug(f"No data for {gap:.1f}s ({empty_reads} empty reads) — "
+                              f"connection may be lost")
+                    last_data_time = time.time()  # reset to avoid spamming
+                    empty_reads = 0
                 continue
+
+            last_data_time = time.time()
+            chunks_received += 1
+            if chunks_received <= 3:
+                log.debug(f"Chunk #{chunks_received}: {len(data)} bytes, "
+                          f"first 16: {data[:16].hex()}")
 
             # Check for stop magic in received data
             combined = trailing + data
             stop_pos = combined.find(STOP_MAGIC)
 
             if stop_pos >= 0:
-                # Found stop marker - save audio up to this point
-                new_audio = combined[len(trailing):stop_pos + len(trailing) - len(trailing)]
-                # Simpler: just take everything before stop_pos, minus what's already saved
                 audio_before_stop = combined[:stop_pos]
                 fresh_audio = audio_before_stop[len(trailing):]
                 pcm_data.extend(fresh_audio)
                 total_bytes += len(fresh_audio)
+                elapsed = time.time() - start_time
                 print("\nStop marker received.")
+                log.debug(f"Stop after {chunks_received} chunks, "
+                          f"{total_bytes:,} bytes, {elapsed:.1f}s")
                 break
             else:
                 # No stop marker. Save all but last 3 bytes (stop magic could span reads)
@@ -151,7 +195,14 @@ def main():
                         help='Baud rate (default: 115200)')
     parser.add_argument('--continuous', '-c', action='store_true',
                         help='Keep listening for multiple recordings')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Enable debug logging')
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format='[%(levelname)s] %(message)s'
+    )
 
     if args.list:
         list_ports()
@@ -179,7 +230,11 @@ def main():
         print(f"Error opening serial port: {e}")
         sys.exit(1)
 
-    print(f"Connected. Output: {args.output}")
+    print(f"Connected to {args.port} @ {args.baud} baud")
+    log.debug(f"Port details: DSR={ser.dsr}, CTS={ser.cts}, RI={ser.ri}, CD={ser.cd}")
+    log.debug(f"  timeout={ser.timeout}s, bytesize={ser.bytesize}, "
+              f"parity={ser.parity}, stopbits={ser.stopbits}")
+    print(f"Output: {args.output}")
 
     try:
         recording_count = 0
