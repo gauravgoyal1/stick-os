@@ -802,6 +802,13 @@ void loop() {
         if (StickCP2.BtnB.wasPressed()) {
             disconnectDevice();
         }
+
+        // Update header time every minute when on connected screen
+        static unsigned long lastTimeUpdate = 0;
+        if (millis() - lastTimeUpdate >= 60000) {
+            drawHeader();
+            lastTimeUpdate = millis();
+        }
     }
 
     // Periodic heartbeat for debug
