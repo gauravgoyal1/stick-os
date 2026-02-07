@@ -306,7 +306,9 @@ bool attemptReconnect() {
     uint8_t addr[6];
     addrStringToBytes(savedDeviceAddr, addr);
 
+    Serial.printf("[AiPin] Reconnecting to %s...\n", savedDeviceAddr.c_str());
     bool connected = SerialBT.connect(addr);
+    Serial.printf("[AiPin] Reconnect result: %d\n", connected);
 
     if (connected) {
         isConnected = true;
@@ -566,11 +568,15 @@ void sendStreamHeader() {
     uint16_t bitDepth   = AUDIO_BIT_DEPTH;
     uint16_t channels   = AUDIO_CHANNELS;
 
-    SerialBT.write(STREAM_START_MAGIC, 4);
-    SerialBT.write((uint8_t*)&sampleRate, 4);
-    SerialBT.write((uint8_t*)&bitDepth, 2);
-    SerialBT.write((uint8_t*)&channels, 2);
+    Serial.printf("[AiPin] Sending APST header (connected=%d, hasClient=%d)\n",
+                  SerialBT.connected(), SerialBT.hasClient());
+    size_t w1 = SerialBT.write(STREAM_START_MAGIC, 4);
+    size_t w2 = SerialBT.write((uint8_t*)&sampleRate, 4);
+    size_t w3 = SerialBT.write((uint8_t*)&bitDepth, 2);
+    size_t w4 = SerialBT.write((uint8_t*)&channels, 2);
     SerialBT.flush();
+    Serial.printf("[AiPin] Header sent: %d+%d+%d+%d = %d bytes\n",
+                  w1, w2, w3, w4, w1+w2+w3+w4);
 }
 
 void sendStreamStop() {
@@ -685,13 +691,22 @@ void stopRecording() {
     drawConnectedScreen();
 }
 
+static unsigned long lastChunkLog = 0;
+static int chunkCount = 0;
+
 void captureAndStreamChunk() {
     if (!isRecording || !StickCP2.Mic.isEnabled()) return;
 
     // record() starts async DMA capture — must wait for completion before reading buffer
     if (StickCP2.Mic.record(audioBuffer, AUDIO_CHUNK_SAMPLES, AUDIO_SAMPLE_RATE)) {
         while (StickCP2.Mic.isRecording()) { delay(1); }
-        SerialBT.write((uint8_t*)audioBuffer, AUDIO_CHUNK_BYTES);
+        size_t written = SerialBT.write((uint8_t*)audioBuffer, AUDIO_CHUNK_BYTES);
+        chunkCount++;
+        if (millis() - lastChunkLog > 2000) {
+            Serial.printf("[AiPin] chunks=%d last_write=%d/%d connected=%d\n",
+                          chunkCount, written, AUDIO_CHUNK_BYTES, SerialBT.connected());
+            lastChunkLog = millis();
+        }
     }
 }
 
@@ -699,6 +714,9 @@ void captureAndStreamChunk() {
 //              SETUP
 // ==========================================
 void setup() {
+    Serial.begin(115200);
+    Serial.println("\n[AiPin] Booting...");
+
     StickCP2.begin();
     StickCP2.Speaker.begin();
     StickCP2.Speaker.setVolume(120);
@@ -723,15 +741,29 @@ void setup() {
     delay(1000);
 
     // Initialize Classic BT in master mode (allows scanning + connecting)
-    SerialBT.begin("AiPin", true);
+    SerialBT.register_callback([](esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
+        Serial.printf("[BT-SPP] event=%d\n", event);
+    });
+    SerialBT.begin("AiPin");  // slave mode (default)
+    SerialBT.setPin("1234", 4);
+    Serial.println("[AiPin] BT initialized (slave mode, PIN=1234)");
 
-    // Try to reconnect to last device, or scan if none saved
-    if (loadLastDevice()) {
-        currentState = STATE_RECONNECTING;
-        drawReconnectingScreen();
-    } else {
-        startScan();
-    }
+    // Show waiting screen — Mac connects by opening /dev/cu.AiPin
+    currentState = STATE_CONNECTED;
+    isConnected = false;
+    connDeviceName = "Waiting...";
+    connDeviceAddr = "Open /dev/cu.AiPin on Mac";
+
+    StickCP2.Display.fillScreen(C_BLACK);
+    drawHeader("WAITING");
+    StickCP2.Display.setTextSize(1);
+    StickCP2.Display.setTextColor(C_YELLOW);
+    StickCP2.Display.setCursor(6, LIST_TOP_Y);
+    StickCP2.Display.print("Run receiver.py on Mac");
+    StickCP2.Display.setTextColor(C_GRAY);
+    StickCP2.Display.setCursor(6, LIST_TOP_Y + 16);
+    StickCP2.Display.print("to connect via SPP...");
+    drawFooter("---", "---");
 }
 
 // ==========================================
@@ -793,8 +825,23 @@ void loop() {
         }
 
         case STATE_CONNECTED: {
-            // Check for lost connection
-            if (!SerialBT.connected()) {
+            // Waiting for Mac to connect (slave mode)
+            if (!isConnected && SerialBT.connected()) {
+                isConnected = true;
+                connDeviceName = "Mac (SPP)";
+                connDeviceAddr = "";
+                connDeviceClassStr = "Computer";
+                connDeviceRSSI = 0;
+
+                Serial.println("[AiPin] Mac connected via SPP!");
+                StickCP2.Speaker.tone(1500, 80);
+                delay(80);
+                StickCP2.Speaker.tone(2000, 80);
+                drawConnectedScreen();
+            }
+
+            // Check for lost connection (only when previously connected)
+            if (isConnected && !SerialBT.connected()) {
                 // If recording, clean up mic state
                 if (isRecording) {
                     isRecording = false;
@@ -805,19 +852,20 @@ void loop() {
                 }
 
                 isConnected = false;
+                Serial.println("[AiPin] Connection lost, waiting for reconnect...");
                 StickCP2.Speaker.tone(300, 200);
 
-                // Auto-reconnect to saved device
-                if (savedDeviceAddr.length() > 0) {
-                    drawReconnectingScreen();
-                    delay(500);
-                    if (attemptReconnect()) {
-                        break;  // Successfully reconnected
-                    }
-                }
-
-                // Reconnect failed or no saved device — scan
-                startScan();
+                // Go back to waiting screen
+                StickCP2.Display.fillScreen(C_BLACK);
+                drawHeader("WAITING");
+                StickCP2.Display.setTextSize(1);
+                StickCP2.Display.setTextColor(C_YELLOW);
+                StickCP2.Display.setCursor(6, LIST_TOP_Y);
+                StickCP2.Display.print("Connection lost.");
+                StickCP2.Display.setTextColor(C_GRAY);
+                StickCP2.Display.setCursor(6, LIST_TOP_Y + 16);
+                StickCP2.Display.print("Run receiver.py to reconnect");
+                drawFooter("---", "---");
                 break;
             }
 
