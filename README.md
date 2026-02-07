@@ -1,47 +1,83 @@
 # AiPin
 
-Bluetooth audio streamer for the **M5StickC Plus 2**.
+Audio streamer for the **M5StickC Plus 2** with Bluetooth and WiFi transport options.
 
 ## Features
 
-- **SPP slave mode** — the device advertises as "AiPin" and waits for your Mac to connect
-- **Record & stream** audio from the built-in microphone over Bluetooth SPP
-- **Real-time noise reduction** — high-pass filter and noise gate for cleaner audio
-- **Icon-based UI** — visual interface with minimal text, easy to read at a glance
-- **Save** streamed audio as `.wav` on your Mac via the included receiver script
-- **Auto-detect** connection and disconnection with audio feedback
+- **Two transport modes** — Bluetooth SPP or WiFi TCP streaming
+- **Record & stream** audio from the built-in microphone
+- **Real-time audio processing** — gain, high-pass filter, low-pass filter, noise gate, soft clipping
+- **Icon-based UI** — visual interface with battery, signal strength, and recording indicators
+- **Gemini AI transcription** — automatic speech-to-text with speaker diarization (WiFi mode)
+- **Auto-reconnect** — recovers from WiFi/server/BT disconnections
 
 ## Hardware
 
 - [M5StickC Plus 2](https://docs.m5stack.com/en/core/M5StickC%20PLUS2) (ESP32-based)
 - Built-in SPM1423 PDM microphone
-- 240x135 LCD display
+- 135x240 LCD display
 - Two buttons: BtnA (front), BtnB (side)
 
-## Quick Start
+## Project Structure
+
+```
+aipin_bl/          # Bluetooth variant
+  aipin.ino        #   Firmware (BT SPP slave mode)
+  receiver.py      #   Mac-side receiver + transcription
+aipin_wifi/        # WiFi variant
+  aipin_wifi.ino   #   Firmware (WiFi + TCP client)
+server/            # WiFi server
+  server.py        #   TCP server + Gemini transcription
+  README.md        #   Server-specific docs
+```
+
+## Quick Start — Bluetooth Mode
 
 ### 1. Flash the firmware
 
 ```bash
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX .
+arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX aipin_bl/
 ```
 
 ### 2. Pair with your Mac
 
-1. Open **System Settings → Bluetooth** on your Mac
+1. Open **System Settings > Bluetooth** on your Mac
 2. The device appears as **"AiPin"** — click Connect (PIN: `1234`)
 3. A serial port `/dev/cu.AiPin` becomes available
 
-### 3. Receive audio on Mac
+### 3. Receive audio
 
 ```bash
 pip install pyserial
-python receiver.py --port /dev/cu.AiPin --output recording.wav
+python aipin_bl/receiver.py --port /dev/cu.AiPin
 ```
 
-Running `receiver.py` opens the serial port, which triggers the SPP connection. The device detects the connection, shows the connected screen, and BtnA starts recording. The receiver captures streamed audio and writes a `.wav` file when recording stops.
+## Quick Start — WiFi Mode
 
-### 4. Device buttons
+### 1. Configure WiFi and server
+
+Edit `aipin_wifi/aipin_wifi.ino` — update WiFi credentials and server IP address.
+
+### 2. Flash the firmware
+
+```bash
+arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX aipin_wifi/
+```
+
+### 3. Start the server
+
+```bash
+pip install requests
+python server/server.py --port 8765
+```
+
+The server prints its local IP — use that in the firmware config. Recordings are saved to `recordings/` and transcripts to `transcripts/`.
+
+### 4. Transcription
+
+Set `GEMINI_API_KEY` in a `.env` file at the project root. The server automatically transcribes recordings with speaker diarization.
+
+## Device Buttons
 
 | Screen | BtnA | BtnB |
 |--------|------|------|
@@ -51,56 +87,45 @@ Running `receiver.py` opens the serial port, which triggers the SPP connection. 
 
 ## Audio Streaming Protocol
 
-Audio is streamed over Bluetooth SPP using a simple binary protocol:
+Audio is streamed using a simple binary protocol (same for both BT and WiFi):
 
 | Packet | Size | Content |
 |--------|------|---------|
 | Start | 12 bytes | `APST` magic + sample rate (uint32) + bit depth (uint16) + channels (uint16) |
-| Audio | 1024 bytes each | Raw PCM int16 chunks (512 samples) |
+| Audio | 1024 bytes each | Raw PCM chunks |
 | Stop | 4 bytes | `APND` magic |
 
-Default format: **16kHz, 16-bit, mono** (~32 KB/s).
+Default format: **8kHz, 8-bit, mono** (~8 KB/s).
 
-## Audio Quality Features
+## Audio Processing Pipeline
 
-The firmware includes real-time noise reduction processing:
+The firmware processes audio in real-time before streaming:
 
-- **High-pass filter** — removes DC offset and low-frequency rumble (< 100Hz)
-- **Noise gate** — suppresses quiet background noise and hiss
-- **Configurable thresholds** — adjust in `aipin.ino`:
-  - `NOISE_GATE_THRESHOLD` (default: 150) — higher values = more aggressive noise suppression
-  - `HPF_ALPHA` (default: 0.95) — filter coefficient for DC removal
+1. **Gain** — software amplification
+2. **High-pass filter** — removes DC offset and low-frequency rumble
+3. **Low-pass filter** — removes high-frequency noise
+4. **Noise gate** — suppresses quiet background noise
+5. **Soft clipping** — compresses peaks for natural limiting
+6. **Hard clipping** — prevents overflow
 
-The recording screen displays icons indicating:
-
-- 🎤 Recording status with pulsing indicator
-- 📶 Bluetooth SPP connection
-- 🌊 Sample rate (16kHz)
-- 🔽 Noise reduction (NR) active
-
-## Receiver Options
-
-```
-python receiver.py --list                  # List serial ports
-python receiver.py -p PORT                 # Auto-timestamped output
-python receiver.py -p PORT -o file.wav     # Named output
-python receiver.py -p PORT --continuous    # Multiple recordings
-python receiver.py -p PORT --verbose       # Debug logging
-```
+All parameters are tunable at runtime via Serial commands: `gain`, `gate`, `hpf`, `lpf`, `knee`, `ratio`.
 
 ## Requirements
 
 **Firmware:**
 - `arduino-cli` with M5Stack ESP32 board package
-- Libraries: M5StickCPlus2, BluetoothSerial (ESP32 core)
+- Libraries: M5StickCPlus2
 
-**Receiver:**
-- Python 3
-- `pyserial` (`pip install pyserial`)
+**Bluetooth receiver:**
+- Python 3, `pyserial`
+
+**WiFi server:**
+- Python 3, `requests`
+- `GEMINI_API_KEY` (optional, for transcription)
 
 ## Notes
 
-- The device runs in BT slave mode — it does not scan or initiate connections
-- The Mac connects by opening `/dev/cu.AiPin` (e.g. via `receiver.py`)
-- Speaker and microphone share GPIO 0 and cannot run simultaneously — speaker is automatically disabled during recording
-- Serial debug logging is available at 115200 baud over USB
+- Speaker and microphone share GPIO 0 — speaker is automatically disabled during recording
+- Serial debug logging available at 115200 baud over USB
+- WiFi variant auto-reconnects to WiFi and server on connection loss
+- BT variant runs in slave mode — the Mac initiates the connection

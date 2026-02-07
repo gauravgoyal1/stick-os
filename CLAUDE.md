@@ -4,78 +4,83 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AiPin is a Bluetooth **audio streamer** for the **M5StickC Plus 2** (ESP32-based microcontroller). It runs in BT slave mode, advertising as "AiPin" and waiting for a Mac to connect via SPP. Once connected, it records audio from the built-in microphone and streams it over Bluetooth to the Mac.
+AiPin is an **audio streamer** for the **M5StickC Plus 2** (ESP32-based microcontroller). It captures audio from the built-in microphone and streams it to a Mac for recording and transcription. Two transport variants are available:
+
+- **`aipin_bl/`** — Bluetooth SPP mode. Runs as a BT slave ("AiPin"), Mac connects via serial port.
+- **`aipin_wifi/`** — WiFi + TCP mode. Connects to a known WiFi network and streams to a TCP server.
+- **`server/`** — Python TCP server that receives WiFi audio streams, saves WAV files, and transcribes with Gemini AI.
 
 ## Build & Upload Commands
 
 Uses `arduino-cli` with the M5Stack board package.
 
 ```bash
-# Compile
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 .
+# Compile (specify sketch directory)
+arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 aipin_bl/
+arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 aipin_wifi/
 
 # Find connected device port
 arduino-cli board list
 
 # Upload (replace port as needed)
-arduino-cli upload --fqbn m5stack:esp32:m5stack_stickc_plus2 -p /dev/cu.usbserial-XXXXX .
+arduino-cli upload --fqbn m5stack:esp32:m5stack_stickc_plus2 -p /dev/cu.usbserial-XXXXX aipin_wifi/
 
 # Compile + upload in one shot
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX .
+arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX aipin_wifi/
 ```
 
 **Board package sources** (configured in arduino-cli):
 - ESP32: `https://dl.espressif.com/dl/package_esp32_index.json`
 - M5Stack: `https://static-cdn.m5stack.com/resource/arduino/package_m5stack_index.json`
 
-**Required libraries**: M5StickCPlus2, BluetoothSerial (ESP32 core)
+**Required libraries**: M5StickCPlus2, BluetoothSerial (ESP32 core, BT variant only), WiFi (ESP32 core, WiFi variant only)
 
 ## Architecture
 
-Single-file state machine in `aipin.ino` with four states:
+### Bluetooth variant (`aipin_bl/aipin.ino`)
 
-```
-STATE_SCANNING → STATE_SCAN_RESULTS → STATE_CONNECTING → STATE_CONNECTED
-                      ↑                                        |
-                      └──────── disconnect / lost connection ───┘
-```
+Single-file state machine. Runs in BT slave mode, advertising as "AiPin". Mac connects by opening `/dev/cu.AiPin` (e.g. via `receiver.py`). Connected screen shows device info; BtnA starts recording, BtnB disconnects.
 
-**Scan flow**: Classic BT discovery (5s blocking via `SerialBT.discover()`). Results stored in `devices[]` array, sorted named-first then by RSSI descending.
+### WiFi variant (`aipin_wifi/aipin_wifi.ino`)
 
-**Connection flow**: Classic BT connects via SPP (`SerialBT.connect(addr)`). Connected screen shows device name, MAC address, device class, and RSSI. BtnA starts recording, BtnB disconnects.
+Single-file state machine. On boot, scans for known WiFi networks (hardcoded credentials), connects, then establishes a TCP connection to the server. Auto-reconnects on WiFi or server loss.
 
-**Audio streaming flow**: When recording, the built-in SPM1423 PDM microphone captures 16kHz 16-bit mono audio. Raw PCM data is streamed over SPP using a simple protocol: 12-byte `APST` header (magic + format), then raw PCM chunks (1024 bytes each), then 4-byte `APND` stop marker. The `isRecording` flag extends `STATE_CONNECTED` without adding a new state.
+### Server (`server/server.py`)
 
-**UI pattern**: All screens follow `drawHeader()` / content / `drawFooter()` structure. The header shows title + battery %. The footer shows BtnA/BtnB action hints. Device list supports scrolling with `scrollOffset` / `selectedIndex`.
+TCP server that accepts connections from WiFi-mode AiPin devices. Handles multiple clients via threads. Receives audio using the same APST/APND protocol, saves WAV files, and optionally transcribes with Gemini API (speaker diarization).
 
-**Display**: 240x135 pixels, landscape (rotation 1). **Inputs**: BtnA (front button), BtnB (side button).
+### Shared architecture
+
+**Audio streaming protocol**: 12-byte `APST` header (magic + sample rate uint32 + bit depth uint16 + channels uint16), then raw PCM chunks (1024 bytes each), then 4-byte `APND` stop marker.
+
+**Audio format**: 8kHz 8-bit mono. Mic captures 16-bit natively; firmware applies a processing pipeline (gain, HPF, LPF, noise gate, soft/hard clipping) then downsamples to 8-bit.
+
+**UI pattern**: All screens follow `drawHeader()` / content / `drawFooter()` structure. Header shows title + battery %. Footer shows BtnA/BtnB action hints.
+
+**Display**: 135x240 pixels, portrait (rotation 0). **Inputs**: BtnA (front button), BtnB (side button).
 
 ## Key Constraints
 
-- Max 20 scanned devices (`MAX_DEVICES`)
-- 6 visible items per screen (`VISIBLE_ITEMS`), scrollable via `scrollOffset`
-- `BluetoothSerial::begin("AiPin", true)` — second arg `true` enables master mode (required for scanning/connecting)
-- macOS devices only appear in Classic BT scan when their Bluetooth settings panel is open
 - Colors are initialized via `initColors()` after display init — use the `C_*` globals, not raw color constants
 - **Speaker and microphone share GPIO 0** — `Speaker.end()` must be called before `Mic.begin()` and vice versa
-- Audio streaming: 16kHz 16-bit mono PCM over SPP (~32KB/s, well within SPP bandwidth)
+- Audio processing parameters are tunable at runtime via Serial commands: `gain`, `gate`, `hpf`, `lpf`, `knee`, `ratio`, `audio`
+- WiFi variant: credentials and server IP are hardcoded in `aipin_wifi.ino` — update before deploying
+- Server requires `GEMINI_API_KEY` in `.env` (project root) for transcription
 
-## Python Audio Receiver
+## Bluetooth Receiver
 
-`receiver.py` runs on the Mac to save streamed audio as `.wav` files.
+`aipin_bl/receiver.py` runs on the Mac to receive BT audio and save as `.wav` files.
 
 ```bash
 pip install pyserial
+python aipin_bl/receiver.py --port /dev/cu.AiPin --continuous
+```
 
-# List available serial ports
-python receiver.py --list
+## WiFi Server
 
-# Receive a single recording
-python receiver.py --port /dev/cu.AiPin --output recording.wav
+`server/server.py` runs on the Mac/server to receive WiFi audio.
 
-# Auto-timestamped filename
-python receiver.py --port /dev/cu.AiPin
-
-# Continuous mode (multiple recordings)
-python receiver.py --port /dev/cu.AiPin --continuous
+```bash
+pip install requests
+python server/server.py --port 8765
 ```
