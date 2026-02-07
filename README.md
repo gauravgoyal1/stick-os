@@ -1,15 +1,15 @@
 # AiPin
 
-Bluetooth device scanner, connection manager, and audio streamer for the **M5StickC Plus 2**.
+Bluetooth audio streamer for the **M5StickC Plus 2**.
 
 ## Features
 
-- **Scan** for Classic Bluetooth devices (5-second discovery)
-- **Browse** results in a scrollable list sorted by signal strength
-- **Connect** to any device via SPP (Serial Port Profile)
-- **Auto-reconnect** to the last connected device on boot and after connection loss
-- **Record & stream** audio from the built-in microphone to the connected device
-- **Save** streamed audio as `.wav` on your Mac
+- **SPP slave mode** — the device advertises as "AiPin" and waits for your Mac to connect
+- **Record & stream** audio from the built-in microphone over Bluetooth SPP
+- **Real-time noise reduction** — high-pass filter and noise gate for cleaner audio
+- **Icon-based UI** — visual interface with minimal text, easy to read at a glance
+- **Save** streamed audio as `.wav` on your Mac via the included receiver script
+- **Auto-detect** connection and disconnection with audio feedback
 
 ## Hardware
 
@@ -26,14 +26,11 @@ Bluetooth device scanner, connection manager, and audio streamer for the **M5Sti
 arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX .
 ```
 
-### 2. Use the device
+### 2. Pair with your Mac
 
-| Screen | BtnA | BtnB |
-|--------|------|------|
-| Reconnecting | Skip to Scan | --- |
-| Scan Results | Connect | Next device |
-| Connected | Record | Disconnect |
-| Recording | Stop | Disconnect |
+1. Open **System Settings → Bluetooth** on your Mac
+2. The device appears as **"AiPin"** — click Connect (PIN: `1234`)
+3. A serial port `/dev/cu.AiPin` becomes available
 
 ### 3. Receive audio on Mac
 
@@ -42,7 +39,15 @@ pip install pyserial
 python receiver.py --port /dev/cu.AiPin --output recording.wav
 ```
 
-The receiver waits for the AiPin to start recording, captures the streamed audio, and writes a `.wav` file when recording stops.
+Running `receiver.py` opens the serial port, which triggers the SPP connection. The device detects the connection, shows the connected screen, and BtnA starts recording. The receiver captures streamed audio and writes a `.wav` file when recording stops.
+
+### 4. Device buttons
+
+| Screen | BtnA | BtnB |
+|--------|------|------|
+| Waiting | --- | --- |
+| Connected | Record | Disconnect |
+| Recording | Stop | Disconnect |
 
 ## Audio Streaming Protocol
 
@@ -55,6 +60,23 @@ Audio is streamed over Bluetooth SPP using a simple binary protocol:
 | Stop | 4 bytes | `APND` magic |
 
 Default format: **16kHz, 16-bit, mono** (~32 KB/s).
+
+## Audio Quality Features
+
+The firmware includes real-time noise reduction processing:
+
+- **High-pass filter** — removes DC offset and low-frequency rumble (< 100Hz)
+- **Noise gate** — suppresses quiet background noise and hiss
+- **Configurable thresholds** — adjust in `aipin.ino`:
+  - `NOISE_GATE_THRESHOLD` (default: 150) — higher values = more aggressive noise suppression
+  - `HPF_ALPHA` (default: 0.95) — filter coefficient for DC removal
+
+The recording screen displays icons indicating:
+
+- 🎤 Recording status with pulsing indicator
+- 📶 Bluetooth SPP connection
+- 🌊 Sample rate (16kHz)
+- 🔽 Noise reduction (NR) active
 
 ## Receiver Options
 
@@ -78,5 +100,7 @@ python receiver.py -p PORT --verbose       # Debug logging
 
 ## Notes
 
-- macOS devices only appear in BT scan when their Bluetooth Settings panel is open
-- Speaker and microphone share GPIO 0 and cannot run simultaneously -- speaker is automatically disabled during recording
+- The device runs in BT slave mode — it does not scan or initiate connections
+- The Mac connects by opening `/dev/cu.AiPin` (e.g. via `receiver.py`)
+- Speaker and microphone share GPIO 0 and cannot run simultaneously — speaker is automatically disabled during recording
+- Serial debug logging is available at 115200 baud over USB

@@ -1,62 +1,26 @@
 #include <M5StickCPlus2.h>
 #include <BluetoothSerial.h>
-#include <Preferences.h>
+#include "esp_gap_bt_api.h"
 
 // ==========================================
 //          DISPLAY CONFIGURATION
 // ==========================================
-#define SCREEN_W 240
-#define SCREEN_H 135
+#define SCREEN_W 135
+#define SCREEN_H 240
 
-uint16_t C_BLACK, C_WHITE, C_GREEN, C_RED, C_BLUE, C_CYAN, C_YELLOW, C_ORANGE, C_GRAY, C_DARKGRAY;
+uint16_t C_BLACK, C_WHITE, C_GREEN, C_RED, C_CYAN, C_YELLOW, C_ORANGE, C_GRAY, C_DARKGRAY;
 
 void initColors() {
     C_BLACK    = BLACK;
     C_WHITE    = WHITE;
     C_GREEN    = GREEN;
     C_RED      = RED;
-    C_BLUE     = BLUE;
     C_CYAN     = CYAN;
     C_YELLOW   = YELLOW;
     C_ORANGE   = ORANGE;
     C_GRAY     = StickCP2.Display.color565(128, 128, 128);
     C_DARKGRAY = StickCP2.Display.color565(40, 40, 40);
 }
-
-// ==========================================
-//          APPLICATION STATE
-// ==========================================
-enum AppState {
-    STATE_SCANNING,
-    STATE_SCAN_RESULTS,
-    STATE_CONNECTING,
-    STATE_CONNECTED,
-    STATE_RECONNECTING
-};
-
-AppState currentState = STATE_SCANNING;
-
-// ==========================================
-//          SCANNED DEVICE DATA
-// ==========================================
-#define MAX_DEVICES 20
-
-struct ScannedDevice {
-    String name;
-    String address;
-    int rssi;
-    bool hasName;
-    uint32_t cod; // Class of Device
-};
-
-ScannedDevice devices[MAX_DEVICES];
-int deviceCount = 0;
-int selectedIndex = 0;
-int scrollOffset = 0;
-
-#define VISIBLE_ITEMS 6
-#define ROW_HEIGHT 16
-#define LIST_TOP_Y 28
 
 // ==========================================
 //          AUDIO STREAMING CONFIG
@@ -67,10 +31,20 @@ int scrollOffset = 0;
 #define AUDIO_CHUNK_SAMPLES  512                          // samples per chunk
 #define AUDIO_CHUNK_BYTES    (AUDIO_CHUNK_SAMPLES * 2)    // 1024 bytes per chunk
 
+#define LIST_TOP_Y 28
+
 // Recording state
 bool isRecording = false;
 unsigned long recordStartMillis = 0;
 int16_t audioBuffer[AUDIO_CHUNK_SAMPLES];
+
+// Noise reduction settings
+#define NOISE_GATE_THRESHOLD  150   // Suppress samples below this absolute value
+#define HPF_ALPHA            0.95   // High-pass filter coefficient (0.95 = ~100Hz cutoff at 16kHz)
+float hpf_prev_input = 0.0;
+float hpf_prev_output = 0.0;
+int32_t dc_offset_accumulator = 0;
+int dc_offset_samples = 0;
 
 // Protocol magic bytes
 const uint8_t STREAM_START_MAGIC[4] = {0x41, 0x50, 0x53, 0x54}; // "APST"
@@ -80,12 +54,6 @@ const uint8_t STREAM_STOP_MAGIC[4]  = {0x41, 0x50, 0x4E, 0x44}; // "APND"
 //          BT OBJECTS
 // ==========================================
 BluetoothSerial SerialBT;
-Preferences preferences;
-
-// Saved device for auto-reconnect (persisted in NVS)
-String savedDeviceAddr = "";
-String savedDeviceName = "";
-uint32_t savedDeviceCOD = 0;
 
 // Connection state
 bool isConnected = false;
@@ -93,25 +61,6 @@ String connDeviceName = "";
 String connDeviceAddr = "";
 int connDeviceRSSI = 0;
 String connDeviceClassStr = "";
-
-// ==========================================
-//        DEVICE CLASS DECODER
-// ==========================================
-const char* getDeviceClassName(uint32_t cod) {
-    uint8_t major = (cod >> 8) & 0x1F;
-    switch (major) {
-        case 1:  return "Computer";
-        case 2:  return "Phone";
-        case 3:  return "Network";
-        case 4:  return "Audio/Video";
-        case 5:  return "Peripheral";
-        case 6:  return "Imaging";
-        case 7:  return "Wearable";
-        case 8:  return "Toy";
-        case 9:  return "Health";
-        default: return "Unknown";
-    }
-}
 
 // ==========================================
 //        DRAWING HELPERS
@@ -133,6 +82,51 @@ void drawRSSIBars(int x, int y, int rssi) {
     }
 }
 
+// ==========================================
+//        ICON DRAWING FUNCTIONS
+// ==========================================
+void drawMicIcon(int x, int y, uint16_t color) {
+    // Microphone capsule (rounded rectangle)
+    StickCP2.Display.fillRoundRect(x + 3, y, 6, 9, 2, color);
+    // Mic stand
+    StickCP2.Display.drawLine(x + 6, y + 9, x + 6, y + 13, color);
+    StickCP2.Display.drawLine(x + 3, y + 11, x + 9, y + 11, color);
+    // Base
+    StickCP2.Display.drawLine(x + 2, y + 13, x + 10, y + 13, color);
+}
+
+void drawBluetoothIcon(int x, int y, uint16_t color) {
+    // Classic Bluetooth symbol
+    StickCP2.Display.drawLine(x + 4, y, x + 4, y + 12, color);
+    StickCP2.Display.drawLine(x + 4, y, x + 8, y + 3, color);
+    StickCP2.Display.drawLine(x + 8, y + 3, x + 1, y + 6, color);
+    StickCP2.Display.drawLine(x + 1, y + 6, x + 8, y + 9, color);
+    StickCP2.Display.drawLine(x + 8, y + 9, x + 4, y + 12, color);
+}
+
+void drawWaveIcon(int x, int y, uint16_t color) {
+    // Sound waves (3 curved lines)
+    StickCP2.Display.drawLine(x, y + 4, x + 1, y + 2, color);
+    StickCP2.Display.drawLine(x + 1, y + 2, x + 2, y, color);
+    StickCP2.Display.drawLine(x, y + 4, x + 1, y + 6, color);
+    StickCP2.Display.drawLine(x + 1, y + 6, x + 2, y + 8, color);
+
+    StickCP2.Display.drawLine(x + 4, y + 4, x + 5, y + 1, color);
+    StickCP2.Display.drawLine(x + 5, y + 1, x + 6, y, color);
+    StickCP2.Display.drawLine(x + 4, y + 4, x + 5, y + 7, color);
+    StickCP2.Display.drawLine(x + 5, y + 7, x + 6, y + 8, color);
+}
+
+void drawFilterIcon(int x, int y, uint16_t color) {
+    // Filter/funnel shape
+    StickCP2.Display.drawLine(x, y, x + 10, y, color);
+    StickCP2.Display.drawLine(x, y, x + 3, y + 4, color);
+    StickCP2.Display.drawLine(x + 10, y, x + 7, y + 4, color);
+    StickCP2.Display.drawLine(x + 3, y + 4, x + 3, y + 8, color);
+    StickCP2.Display.drawLine(x + 7, y + 4, x + 7, y + 8, color);
+    StickCP2.Display.fillRect(x + 3, y + 8, 5, 2, color);
+}
+
 void drawHeader(const char* title) {
     StickCP2.Display.fillRect(0, 0, SCREEN_W, 22, StickCP2.Display.color565(20, 20, 60));
     StickCP2.Display.setTextSize(1);
@@ -141,7 +135,7 @@ void drawHeader(const char* title) {
     StickCP2.Display.print(title);
 
     int batt = StickCP2.Power.getBatteryLevel();
-    StickCP2.Display.setCursor(200, 6);
+    StickCP2.Display.setCursor(100, 6);
     if (batt > 50) StickCP2.Display.setTextColor(C_GREEN);
     else if (batt > 20) StickCP2.Display.setTextColor(C_YELLOW);
     else StickCP2.Display.setTextColor(C_RED);
@@ -154,178 +148,21 @@ void drawFooter(const char* btnALabel, const char* btnBLabel) {
     StickCP2.Display.setTextColor(C_WHITE);
     StickCP2.Display.setCursor(6, SCREEN_H - 11);
     StickCP2.Display.printf("A:%s", btnALabel);
-    StickCP2.Display.setCursor(140, SCREEN_H - 11);
+    StickCP2.Display.setCursor(75, SCREEN_H - 11);
     StickCP2.Display.printf("B:%s", btnBLabel);
 }
 
 // ==========================================
-//        SCANNING SCREEN
+//        WAITING SCREEN
 // ==========================================
-void showScanningScreen(const char* phase) {
+void drawWaitingScreen(const char* message) {
     StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("BT SCANNER");
+    drawHeader("WAITING");
     StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(30, 42);
-    StickCP2.Display.print("Scanning for devices");
-    StickCP2.Display.setCursor(30, 60);
     StickCP2.Display.setTextColor(C_YELLOW);
-    StickCP2.Display.print(phase);
-    StickCP2.Display.setCursor(30, 82);
-    StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.printf("Found so far: %d", deviceCount);
+    StickCP2.Display.setCursor(6, LIST_TOP_Y);
+    StickCP2.Display.print(message);
     drawFooter("---", "---");
-}
-
-// ==========================================
-//        SCAN RESULTS SCREEN
-// ==========================================
-void drawScanResults() {
-    StickCP2.Display.fillScreen(C_BLACK);
-
-    char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "DEVICES (%d)", deviceCount);
-    drawHeader(headerBuf);
-
-    if (deviceCount == 0) {
-        StickCP2.Display.setTextSize(1);
-        StickCP2.Display.setTextColor(C_GRAY);
-        StickCP2.Display.setCursor(40, 50);
-        StickCP2.Display.print("No devices found");
-        StickCP2.Display.setCursor(15, 70);
-        StickCP2.Display.setTextColor(C_YELLOW);
-        StickCP2.Display.print("Open BT settings on");
-        StickCP2.Display.setCursor(15, 82);
-        StickCP2.Display.print("target device to pair");
-        drawFooter("Rescan", "---");
-        return;
-    }
-
-    if (selectedIndex >= deviceCount) selectedIndex = deviceCount - 1;
-    if (selectedIndex < 0) selectedIndex = 0;
-    if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
-    if (selectedIndex >= scrollOffset + VISIBLE_ITEMS) scrollOffset = selectedIndex - VISIBLE_ITEMS + 1;
-
-    StickCP2.Display.setTextSize(1);
-
-    int endIdx = min(scrollOffset + VISIBLE_ITEMS, deviceCount);
-    for (int i = scrollOffset; i < endIdx; i++) {
-        int row = i - scrollOffset;
-        int y = LIST_TOP_Y + row * ROW_HEIGHT;
-        bool isSel = (i == selectedIndex);
-
-        if (isSel) {
-            StickCP2.Display.fillRect(0, y, SCREEN_W, ROW_HEIGHT, StickCP2.Display.color565(0, 40, 80));
-        }
-
-        // Device name
-        StickCP2.Display.setTextColor(isSel ? C_WHITE : C_GRAY);
-        StickCP2.Display.setCursor(6, y + 4);
-        String displayName = devices[i].name;
-        if (displayName.length() > 20) displayName = displayName.substring(0, 18) + "..";
-        StickCP2.Display.print(displayName.c_str());
-
-        // RSSI bars
-        drawRSSIBars(200, y + 3, devices[i].rssi);
-        StickCP2.Display.setCursor(215, y + 4);
-        StickCP2.Display.setTextColor(C_GRAY);
-        StickCP2.Display.printf("%d", devices[i].rssi);
-    }
-
-    // Scroll indicators
-    if (scrollOffset > 0) {
-        StickCP2.Display.setTextColor(C_CYAN);
-        StickCP2.Display.setCursor(234, LIST_TOP_Y);
-        StickCP2.Display.print("^");
-    }
-    if (scrollOffset + VISIBLE_ITEMS < deviceCount) {
-        StickCP2.Display.setTextColor(C_CYAN);
-        StickCP2.Display.setCursor(234, LIST_TOP_Y + (VISIBLE_ITEMS - 1) * ROW_HEIGHT);
-        StickCP2.Display.print("v");
-    }
-
-    drawFooter("Connect", "Next");
-}
-
-// ==========================================
-//        CONNECTING SCREEN
-// ==========================================
-void showConnectingScreen(const char* name) {
-    StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("CONNECTING");
-    StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(20, 45);
-    StickCP2.Display.print("Connecting to:");
-    StickCP2.Display.setCursor(20, 62);
-    StickCP2.Display.setTextColor(C_CYAN);
-    String truncName = name;
-    if (truncName.length() > 28) truncName = truncName.substring(0, 26) + "..";
-    StickCP2.Display.print(truncName.c_str());
-    StickCP2.Display.setCursor(20, 85);
-    StickCP2.Display.setTextColor(C_YELLOW);
-    StickCP2.Display.print("Please wait...");
-}
-
-// ==========================================
-//        RECONNECTING SCREEN
-// ==========================================
-void drawReconnectingScreen() {
-    StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("RECONNECTING");
-
-    StickCP2.Display.setTextSize(1);
-    int y = LIST_TOP_Y;
-
-    // Saved device name
-    StickCP2.Display.setTextColor(C_GREEN);
-    StickCP2.Display.setCursor(6, y);
-    String dispName = savedDeviceName;
-    if (dispName.length() > 28) dispName = dispName.substring(0, 26) + "..";
-    StickCP2.Display.print(dispName.c_str());
-    y += 16;
-
-    // Address
-    StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(6, y);
-    StickCP2.Display.print(savedDeviceAddr.c_str());
-    y += 20;
-
-    // Status
-    StickCP2.Display.setTextColor(C_YELLOW);
-    StickCP2.Display.setCursor(6, y);
-    StickCP2.Display.print("Connecting...");
-
-    drawFooter("Scan", "---");
-}
-
-// ==========================================
-//        RECONNECT LOGIC
-// ==========================================
-bool attemptReconnect() {
-    uint8_t addr[6];
-    addrStringToBytes(savedDeviceAddr, addr);
-
-    Serial.printf("[AiPin] Reconnecting to %s...\n", savedDeviceAddr.c_str());
-    bool connected = SerialBT.connect(addr);
-    Serial.printf("[AiPin] Reconnect result: %d\n", connected);
-
-    if (connected) {
-        isConnected = true;
-        connDeviceName = savedDeviceName;
-        connDeviceAddr = savedDeviceAddr;
-        connDeviceClassStr = getDeviceClassName(savedDeviceCOD);
-        connDeviceRSSI = 0;
-        currentState = STATE_CONNECTED;
-
-        StickCP2.Speaker.tone(1500, 80);
-        delay(80);
-        StickCP2.Speaker.tone(2000, 80);
-
-        drawConnectedScreen();
-        return true;
-    }
-    return false;
 }
 
 // ==========================================
@@ -335,229 +172,73 @@ void drawConnectedScreen() {
     StickCP2.Display.fillScreen(C_BLACK);
     drawHeader("CONNECTED");
 
-    StickCP2.Display.setTextSize(1);
-    int y = LIST_TOP_Y;
+    int y = LIST_TOP_Y + 15;
+    int centerX = SCREEN_W / 2;
 
-    // Device name
+    // Large Bluetooth icon (connected state)
+    drawBluetoothIcon(centerX - 5, y, C_GREEN);
+
+    y += 25;
+
+    // Device name (if available)
+    StickCP2.Display.setTextSize(1);
     StickCP2.Display.setTextColor(C_GREEN);
-    StickCP2.Display.setCursor(6, y);
     String dispName = connDeviceName;
-    if (dispName.length() > 28) dispName = dispName.substring(0, 26) + "..";
+    if (dispName.length() > 20) dispName = dispName.substring(0, 18) + "..";
+    int nameWidth = dispName.length() * 6;
+    StickCP2.Display.setCursor(centerX - nameWidth/2, y);
     StickCP2.Display.print(dispName.c_str());
-    y += 13;
+    y += 15;
 
-    // Address
+    // Device class with icon
     StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(6, y);
-    StickCP2.Display.print(connDeviceAddr.c_str());
-    y += 13;
+    String classText = "SPP";
+    int classWidth = classText.length() * 6;
+    StickCP2.Display.setCursor(centerX - classWidth/2, y);
+    StickCP2.Display.print(classText.c_str());
+    y += 20;
 
-    // Device class
-    StickCP2.Display.setTextColor(C_ORANGE);
-    StickCP2.Display.setCursor(6, y);
-    StickCP2.Display.printf("Classic BT | %s", connDeviceClassStr.c_str());
-    y += 13;
-
-    // RSSI
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(6, y);
-    StickCP2.Display.printf("RSSI: %d dBm", connDeviceRSSI);
-    drawRSSIBars(140, y, connDeviceRSSI);
-
-    drawFooter("Record", "Disconnect");
-}
-
-// ==========================================
-//        ADDRESS STRING TO BYTE ARRAY
-// ==========================================
-void addrStringToBytes(const String& str, uint8_t* addr) {
-    sscanf(str.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-           &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5]);
-}
-
-// ==========================================
-//        NVS PERSISTENCE
-// ==========================================
-void saveLastDevice(const String& addr, const String& name, uint32_t cod) {
-    preferences.begin("aipin", false);
-    preferences.putString("lastAddr", addr);
-    preferences.putString("lastName", name);
-    preferences.putUInt("lastCOD", cod);
-    preferences.end();
-}
-
-bool loadLastDevice() {
-    preferences.begin("aipin", true);
-    savedDeviceAddr = preferences.getString("lastAddr", "");
-    savedDeviceName = preferences.getString("lastName", "");
-    savedDeviceCOD = preferences.getUInt("lastCOD", 0);
-    preferences.end();
-    return savedDeviceAddr.length() > 0;
-}
-
-void clearLastDevice() {
-    preferences.begin("aipin", false);
-    preferences.remove("lastAddr");
-    preferences.remove("lastName");
-    preferences.remove("lastCOD");
-    preferences.end();
-    savedDeviceAddr = "";
-    savedDeviceName = "";
-    savedDeviceCOD = 0;
-}
-
-// ==========================================
-//        START SCAN (CLASSIC BT)
-// ==========================================
-void startScan() {
-    currentState = STATE_SCANNING;
-    deviceCount = 0;
-    selectedIndex = 0;
-    scrollOffset = 0;
-
-    showScanningScreen("Classic BT (5s)...");
-
-    BTScanResults* btResults = SerialBT.discover(5000);
-    if (btResults) {
-        int count = btResults->getCount();
-        for (int i = 0; i < count && deviceCount < MAX_DEVICES; i++) {
-            BTAdvertisedDevice* dev = btResults->getDevice(i);
-            if (!dev) continue;
-
-            devices[deviceCount].address = dev->getAddress().toString().c_str();
-            devices[deviceCount].rssi = dev->haveRSSI() ? dev->getRSSI() : -100;
-            devices[deviceCount].cod = dev->getCOD();
-
-            if (dev->haveName()) {
-                String name = dev->getName().c_str();
-                if (name.length() > 0) {
-                    devices[deviceCount].name = name;
-                    devices[deviceCount].hasName = true;
-                } else {
-                    devices[deviceCount].name = devices[deviceCount].address;
-                    devices[deviceCount].hasName = false;
-                }
-            } else {
-                devices[deviceCount].name = devices[deviceCount].address;
-                devices[deviceCount].hasName = false;
-            }
-            deviceCount++;
-        }
+    // Signal strength visualization (RSSI bars centered)
+    if (connDeviceRSSI != 0) {
+        drawRSSIBars(centerX - 6, y, connDeviceRSSI);
+        y += 15;
+        StickCP2.Display.setTextColor(C_DARKGRAY);
+        StickCP2.Display.setCursor(centerX - 15, y);
+        StickCP2.Display.printf("%d dBm", connDeviceRSSI);
     }
 
-    // Sort: named devices first, then by RSSI descending
-    for (int i = 0; i < deviceCount - 1; i++) {
-        for (int j = 0; j < deviceCount - i - 1; j++) {
-            bool swap = false;
-            if (devices[j + 1].hasName && !devices[j].hasName) swap = true;
-            else if (devices[j + 1].hasName == devices[j].hasName &&
-                     devices[j + 1].rssi > devices[j].rssi) swap = true;
-            if (swap) {
-                ScannedDevice tmp = devices[j];
-                devices[j] = devices[j + 1];
-                devices[j + 1] = tmp;
-            }
-        }
-    }
-
-    currentState = STATE_SCAN_RESULTS;
-    drawScanResults();
+    drawFooter("Rec", "Disc");
 }
 
 // ==========================================
-//        CONNECT TO DEVICE
+//        AUDIO PROCESSING FUNCTIONS
 // ==========================================
-void connectToDevice(int index) {
-    if (index < 0 || index >= deviceCount) return;
+void processAudioBuffer(int16_t* buffer, size_t samples) {
+    // Apply noise reduction processing to the audio buffer
 
-    currentState = STATE_CONNECTING;
-    showConnectingScreen(devices[index].name.c_str());
+    for (size_t i = 0; i < samples; i++) {
+        float input = (float)buffer[i];
 
-    connDeviceName = devices[index].name;
-    connDeviceAddr = devices[index].address;
-    connDeviceRSSI = devices[index].rssi;
-    connDeviceClassStr = getDeviceClassName(devices[index].cod);
+        // 1. DC offset removal using high-pass filter (1st order IIR)
+        //    y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+        //    This removes low-frequency drift and DC bias
+        float hpf_output = HPF_ALPHA * (hpf_prev_output + input - hpf_prev_input);
+        hpf_prev_input = input;
+        hpf_prev_output = hpf_output;
 
-    bool connected = false;
-    uint8_t addr[6];
-    addrStringToBytes(devices[index].address, addr);
-    connected = SerialBT.connect(addr);
-
-    if (connected) {
-        isConnected = true;
-        currentState = STATE_CONNECTED;
-
-        // Persist for auto-reconnect
-        saveLastDevice(connDeviceAddr, connDeviceName, devices[index].cod);
-
-        StickCP2.Speaker.tone(1500, 80);
-        delay(80);
-        StickCP2.Speaker.tone(2000, 80);
-
-        drawConnectedScreen();
-    } else {
-        isConnected = false;
-
-        StickCP2.Display.fillScreen(C_BLACK);
-        drawHeader("FAILED");
-        StickCP2.Display.setTextSize(1);
-        StickCP2.Display.setTextColor(C_RED);
-        StickCP2.Display.setCursor(30, 45);
-        StickCP2.Display.print("Connection failed!");
-        StickCP2.Display.setTextColor(C_GRAY);
-        StickCP2.Display.setCursor(30, 65);
-        StickCP2.Display.print("Device may be out");
-        StickCP2.Display.setCursor(30, 77);
-        StickCP2.Display.print("of range or busy.");
-
-        StickCP2.Speaker.tone(300, 200);
-        drawFooter("Back", "---");
-
-        while (true) {
-            StickCP2.update();
-            if (StickCP2.BtnA.wasPressed()) break;
-            delay(20);
+        // 2. Noise gate: suppress very quiet samples to reduce background hiss
+        //    If the absolute value is below threshold, set to zero
+        if (abs((int16_t)hpf_output) < NOISE_GATE_THRESHOLD) {
+            hpf_output = 0;
         }
 
-        currentState = STATE_SCAN_RESULTS;
-        drawScanResults();
+        // 3. Write processed sample back to buffer
+        //    Clamp to int16_t range to prevent overflow
+        int32_t processed = (int32_t)hpf_output;
+        if (processed > 32767) processed = 32767;
+        if (processed < -32768) processed = -32768;
+        buffer[i] = (int16_t)processed;
     }
-}
-
-// ==========================================
-//        DISCONNECT
-// ==========================================
-void disconnectDevice() {
-    // If recording, stop mic and send stop marker before disconnecting
-    if (isRecording) {
-        isRecording = false;
-        while (StickCP2.Mic.isRecording()) { delay(1); }
-        StickCP2.Mic.end();
-        StickCP2.Speaker.begin();
-        StickCP2.Speaker.setVolume(120);
-        sendStreamStop();
-        delay(50);
-    }
-
-    SerialBT.disconnect();
-    isConnected = false;
-
-    StickCP2.Speaker.tone(800, 100);
-    delay(50);
-    StickCP2.Speaker.tone(400, 100);
-
-    StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("DISCONNECTED");
-    StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_YELLOW);
-    StickCP2.Display.setCursor(40, 55);
-    StickCP2.Display.print("Disconnected.");
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(30, 75);
-    StickCP2.Display.print("Starting new scan...");
-    delay(1200);
-
-    startScan();
 }
 
 // ==========================================
@@ -591,41 +272,48 @@ void drawRecordingScreen() {
     StickCP2.Display.fillScreen(C_BLACK);
     drawHeader("RECORDING");
 
-    int y = LIST_TOP_Y;
+    int y = LIST_TOP_Y + 10;
 
-    // Device name
-    StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_GREEN);
-    StickCP2.Display.setCursor(6, y);
-    String dispName = connDeviceName;
-    if (dispName.length() > 24) dispName = dispName.substring(0, 22) + "..";
-    StickCP2.Display.print(dispName.c_str());
-    y += 14;
+    // Large recording indicator with icon
+    int centerX = SCREEN_W / 2;
 
-    // Recording indicator: red filled circle + "REC"
-    StickCP2.Display.fillCircle(14, y + 4, 5, C_RED);
-    StickCP2.Display.setTextColor(C_RED);
-    StickCP2.Display.setCursor(24, y);
-    StickCP2.Display.print("REC");
+    // Red recording circle (pulsing indicator)
+    StickCP2.Display.fillCircle(centerX - 25, y + 8, 6, C_RED);
 
-    // Duration timer placeholder
+    // Microphone icon
+    drawMicIcon(centerX - 6, y + 2, C_RED);
+
+    // Duration timer
+    StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(54, y);
+    StickCP2.Display.setCursor(centerX - 30, y + 22);
     StickCP2.Display.print("00:00");
-    y += 14;
 
-    // Audio format info
-    StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(6, y);
-    StickCP2.Display.print("16kHz 16bit Mono | SPP");
-    y += 14;
+    y += 50;
 
-    // Streaming status
+    // Status icons row
+    StickCP2.Display.setTextSize(1);
+    int iconY = y;
+
+    // Bluetooth icon + text
+    drawBluetoothIcon(12, iconY, C_CYAN);
     StickCP2.Display.setTextColor(C_CYAN);
-    StickCP2.Display.setCursor(6, y);
-    StickCP2.Display.print("Streaming to device...");
+    StickCP2.Display.setCursor(26, iconY + 2);
+    StickCP2.Display.print("SPP");
 
-    drawFooter("Stop", "Disconnect");
+    // Wave icon + sample rate
+    drawWaveIcon(58, iconY, C_GRAY);
+    StickCP2.Display.setTextColor(C_GRAY);
+    StickCP2.Display.setCursor(72, iconY + 2);
+    StickCP2.Display.print("16k");
+
+    // Filter icon (noise reduction)
+    drawFilterIcon(104, iconY, C_GREEN);
+    StickCP2.Display.setTextColor(C_GREEN);
+    StickCP2.Display.setCursor(118, iconY + 2);
+    StickCP2.Display.print("NR");
+
+    drawFooter("Stop", "Disc");
 }
 
 void updateRecordingTimer() {
@@ -633,18 +321,21 @@ void updateRecordingTimer() {
     unsigned int mins = elapsed / 60;
     unsigned int secs = elapsed % 60;
 
+    int centerX = SCREEN_W / 2;
+    int timerY = LIST_TOP_Y + 32;
+
     // Overwrite just the timer area
-    int timerY = LIST_TOP_Y + 14;
-    StickCP2.Display.fillRect(54, timerY, 40, 10, C_BLACK);
-    StickCP2.Display.setTextSize(1);
+    StickCP2.Display.fillRect(centerX - 30, timerY, 60, 16, C_BLACK);
+    StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(54, timerY);
+    StickCP2.Display.setCursor(centerX - 30, timerY);
     StickCP2.Display.printf("%02d:%02d", mins, secs);
 
     // Blink the red recording dot
     bool dotVisible = ((millis() / 500) % 2 == 0);
     uint16_t dotColor = dotVisible ? C_RED : C_BLACK;
-    StickCP2.Display.fillCircle(14, timerY + 4, 5, dotColor);
+    int dotY = LIST_TOP_Y + 18;
+    StickCP2.Display.fillCircle(centerX - 25, dotY, 6, dotColor);
 }
 
 // ==========================================
@@ -657,6 +348,12 @@ void startRecording() {
     // Start microphone
     StickCP2.Mic.begin();
     delay(50);
+
+    // Reset noise reduction filter state
+    hpf_prev_input = 0.0;
+    hpf_prev_output = 0.0;
+    dc_offset_accumulator = 0;
+    dc_offset_samples = 0;
 
     // Send stream start header over SPP
     sendStreamHeader();
@@ -700,6 +397,10 @@ void captureAndStreamChunk() {
     // record() starts async DMA capture — must wait for completion before reading buffer
     if (StickCP2.Mic.record(audioBuffer, AUDIO_CHUNK_SAMPLES, AUDIO_SAMPLE_RATE)) {
         while (StickCP2.Mic.isRecording()) { delay(1); }
+
+        // Apply noise reduction processing before streaming
+        processAudioBuffer(audioBuffer, AUDIO_CHUNK_SAMPLES);
+
         size_t written = SerialBT.write((uint8_t*)audioBuffer, AUDIO_CHUNK_BYTES);
         chunkCount++;
         if (millis() - lastChunkLog > 2000) {
@@ -708,6 +409,31 @@ void captureAndStreamChunk() {
             lastChunkLog = millis();
         }
     }
+}
+
+// ==========================================
+//        DISCONNECT
+// ==========================================
+void disconnectDevice() {
+    // If recording, stop mic and send stop marker before disconnecting
+    if (isRecording) {
+        isRecording = false;
+        while (StickCP2.Mic.isRecording()) { delay(1); }
+        StickCP2.Mic.end();
+        StickCP2.Speaker.begin();
+        StickCP2.Speaker.setVolume(120);
+        sendStreamStop();
+        delay(50);
+    }
+
+    SerialBT.disconnect();
+    isConnected = false;
+
+    StickCP2.Speaker.tone(800, 100);
+    delay(50);
+    StickCP2.Speaker.tone(400, 100);
+
+    drawWaitingScreen("Disconnected.");
 }
 
 // ==========================================
@@ -720,7 +446,7 @@ void setup() {
     StickCP2.begin();
     StickCP2.Speaker.begin();
     StickCP2.Speaker.setVolume(120);
-    StickCP2.Display.setRotation(1);
+    StickCP2.Display.setRotation(0);
     StickCP2.Display.setTextSize(1);
 
     initColors();
@@ -729,41 +455,50 @@ void setup() {
     StickCP2.Display.fillScreen(C_BLACK);
     StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_CYAN);
-    StickCP2.Display.setCursor(55, 30);
+    StickCP2.Display.setCursor(37, 70);
     StickCP2.Display.print("AiPin");
     StickCP2.Display.setTextSize(1);
     StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(40, 65);
-    StickCP2.Display.print("BT Device Manager");
-    StickCP2.Display.setCursor(35, 90);
+    StickCP2.Display.setCursor(16, 110);
+    StickCP2.Display.print("BT Audio Streamer");
+    StickCP2.Display.setCursor(13, 140);
     StickCP2.Display.setTextColor(C_WHITE);
     StickCP2.Display.print("Initializing BT...");
     delay(1000);
 
-    // Initialize Classic BT in master mode (allows scanning + connecting)
+    // Initialize Classic BT in slave mode (Mac connects to us)
     SerialBT.register_callback([](esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         Serial.printf("[BT-SPP] event=%d\n", event);
     });
+    SerialBT.onConfirmRequest([](uint32_t numVal) {
+        Serial.printf("[BT] SSP confirm request: %d — auto-accepting\n", numVal);
+        SerialBT.confirmReply(true);
+    });
+    SerialBT.onAuthComplete([](boolean success) {
+        Serial.printf("[BT] Auth complete: %s\n", success ? "SUCCESS" : "FAIL");
+    });
     SerialBT.begin("AiPin");  // slave mode (default)
     SerialBT.setPin("1234", 4);
+
+    // Register GAP callback for detailed pairing debug
+    esp_bt_gap_register_callback([](esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+        Serial.printf("[GAP] event=%d\n", event);
+        if (event == ESP_BT_GAP_AUTH_CMPL_EVT) {
+            Serial.printf("[GAP] Auth complete: status=%d name=%s\n",
+                          param->auth_cmpl.stat, param->auth_cmpl.device_name);
+        }
+        if (event == ESP_BT_GAP_PIN_REQ_EVT) {
+            Serial.println("[GAP] PIN requested — replying 1234");
+            esp_bt_pin_code_t pin = {'1', '2', '3', '4'};
+            esp_bt_gap_pin_reply(param->pin_req.bda, true, 4, pin);
+        }
+    });
+
+    // Ensure device is discoverable and connectable
+    esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
     Serial.println("[AiPin] BT initialized (slave mode, PIN=1234)");
 
-    // Show waiting screen — Mac connects by opening /dev/cu.AiPin
-    currentState = STATE_CONNECTED;
-    isConnected = false;
-    connDeviceName = "Waiting...";
-    connDeviceAddr = "Open /dev/cu.AiPin on Mac";
-
-    StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("WAITING");
-    StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_YELLOW);
-    StickCP2.Display.setCursor(6, LIST_TOP_Y);
-    StickCP2.Display.print("Run receiver.py on Mac");
-    StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(6, LIST_TOP_Y + 16);
-    StickCP2.Display.print("to connect via SPP...");
-    drawFooter("---", "---");
+    drawWaitingScreen("Run receiver.py");
 }
 
 // ==========================================
@@ -772,145 +507,77 @@ void setup() {
 void loop() {
     StickCP2.update();
 
-    switch (currentState) {
+    // Detect Mac connecting via SPP
+    if (!isConnected && SerialBT.connected()) {
+        isConnected = true;
+        connDeviceName = "Mac (SPP)";
+        connDeviceAddr = "";
+        connDeviceClassStr = "Computer";
+        connDeviceRSSI = 0;
 
-        case STATE_RECONNECTING: {
-            // Give user 1.5s window to press BtnA to skip to scan
-            unsigned long reconnStart = millis();
-            bool skipped = false;
-            while (millis() - reconnStart < 1500) {
-                StickCP2.update();
-                if (StickCP2.BtnA.wasPressed()) { skipped = true; break; }
-                delay(20);
-            }
-            if (skipped) {
-                StickCP2.Speaker.tone(1000, 50);
-                startScan();
-                break;
-            }
+        Serial.println("[AiPin] Mac connected via SPP!");
+        StickCP2.Speaker.tone(1500, 80);
+        delay(80);
+        StickCP2.Speaker.tone(2000, 80);
+        drawConnectedScreen();
+    }
 
-            // Attempt reconnect (blocking)
-            if (attemptReconnect()) {
-                // Success — now in STATE_CONNECTED
-            } else {
-                // Failed — fall back to scan
-                StickCP2.Speaker.tone(300, 100);
-                startScan();
-            }
-            break;
+    // Detect lost connection
+    if (isConnected && !SerialBT.connected()) {
+        if (isRecording) {
+            isRecording = false;
+            while (StickCP2.Mic.isRecording()) { delay(1); }
+            StickCP2.Mic.end();
+            StickCP2.Speaker.begin();
+            StickCP2.Speaker.setVolume(120);
         }
 
-        case STATE_SCAN_RESULTS: {
-            if (deviceCount == 0) {
-                if (StickCP2.BtnA.wasPressed()) {
-                    StickCP2.Speaker.tone(1000, 50);
-                    startScan();
-                }
-            } else {
-                // BtnB = next device
-                if (StickCP2.BtnB.wasPressed()) {
-                    selectedIndex++;
-                    if (selectedIndex >= deviceCount) selectedIndex = 0;
-                    StickCP2.Speaker.tone(3000, 30);
-                    drawScanResults();
-                }
+        isConnected = false;
+        Serial.println("[AiPin] Connection lost, waiting for reconnect...");
+        StickCP2.Speaker.tone(300, 200);
+        drawWaitingScreen("Connection lost.");
+    }
 
-                // BtnA = connect to selected
-                if (StickCP2.BtnA.wasPressed()) {
-                    StickCP2.Speaker.tone(1500, 50);
-                    connectToDevice(selectedIndex);
-                }
+    // Handle connected state
+    if (isConnected) {
+        if (isRecording) {
+            captureAndStreamChunk();
+
+            static unsigned long lastTimerUpdate = 0;
+            if (millis() - lastTimerUpdate > 1000) {
+                updateRecordingTimer();
+                lastTimerUpdate = millis();
             }
-            break;
+
+            if (StickCP2.BtnA.wasPressed()) {
+                stopRecording();
+            }
+
+            if (StickCP2.BtnB.wasPressed()) {
+                stopRecording();
+                delay(100);
+                disconnectDevice();
+            }
+
+        } else {
+            if (StickCP2.BtnA.wasPressed()) {
+                StickCP2.Speaker.tone(1500, 50);
+                delay(50);
+                startRecording();
+            }
+
+            if (StickCP2.BtnB.wasPressed()) {
+                disconnectDevice();
+            }
         }
+    }
 
-        case STATE_CONNECTED: {
-            // Waiting for Mac to connect (slave mode)
-            if (!isConnected && SerialBT.connected()) {
-                isConnected = true;
-                connDeviceName = "Mac (SPP)";
-                connDeviceAddr = "";
-                connDeviceClassStr = "Computer";
-                connDeviceRSSI = 0;
-
-                Serial.println("[AiPin] Mac connected via SPP!");
-                StickCP2.Speaker.tone(1500, 80);
-                delay(80);
-                StickCP2.Speaker.tone(2000, 80);
-                drawConnectedScreen();
-            }
-
-            // Check for lost connection (only when previously connected)
-            if (isConnected && !SerialBT.connected()) {
-                // If recording, clean up mic state
-                if (isRecording) {
-                    isRecording = false;
-                    while (StickCP2.Mic.isRecording()) { delay(1); }
-                    StickCP2.Mic.end();
-                    StickCP2.Speaker.begin();
-                    StickCP2.Speaker.setVolume(120);
-                }
-
-                isConnected = false;
-                Serial.println("[AiPin] Connection lost, waiting for reconnect...");
-                StickCP2.Speaker.tone(300, 200);
-
-                // Go back to waiting screen
-                StickCP2.Display.fillScreen(C_BLACK);
-                drawHeader("WAITING");
-                StickCP2.Display.setTextSize(1);
-                StickCP2.Display.setTextColor(C_YELLOW);
-                StickCP2.Display.setCursor(6, LIST_TOP_Y);
-                StickCP2.Display.print("Connection lost.");
-                StickCP2.Display.setTextColor(C_GRAY);
-                StickCP2.Display.setCursor(6, LIST_TOP_Y + 16);
-                StickCP2.Display.print("Run receiver.py to reconnect");
-                drawFooter("---", "---");
-                break;
-            }
-
-            if (isRecording) {
-                // Capture and stream one audio chunk
-                captureAndStreamChunk();
-
-                // Update timer display (throttled to once per second)
-                static unsigned long lastTimerUpdate = 0;
-                if (millis() - lastTimerUpdate > 1000) {
-                    updateRecordingTimer();
-                    lastTimerUpdate = millis();
-                }
-
-                // BtnA = stop recording
-                if (StickCP2.BtnA.wasPressed()) {
-                    stopRecording();
-                }
-
-                // BtnB = disconnect (stops recording first)
-                if (StickCP2.BtnB.wasPressed()) {
-                    stopRecording();
-                    delay(100);
-                    disconnectDevice();
-                }
-
-            } else {
-                // BtnA = start recording
-                if (StickCP2.BtnA.wasPressed()) {
-                    StickCP2.Speaker.tone(1500, 50);
-                    delay(50);
-                    startRecording();
-                }
-
-                // BtnB = disconnect
-                if (StickCP2.BtnB.wasPressed()) {
-                    disconnectDevice();
-                }
-            }
-
-            break;
-        }
-
-        default:
-            break;
+    // Periodic heartbeat for debug
+    static unsigned long lastHeartbeat = 0;
+    if (millis() - lastHeartbeat > 5000) {
+        Serial.printf("[AiPin] heartbeat: conn=%d btConn=%d hasClient=%d rec=%d\n",
+                      isConnected, SerialBT.connected(), SerialBT.hasClient(), isRecording);
+        lastHeartbeat = millis();
     }
 
     // Skip delay during recording — captureAndStreamChunk() already paces the loop
