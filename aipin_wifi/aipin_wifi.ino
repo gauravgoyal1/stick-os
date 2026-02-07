@@ -20,7 +20,7 @@ WiFiCredentials wifiNetworks[] = {
 const int numNetworks = sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
 
 // Server configuration
-const char* serverHost = "192.168.100.17";  // Change to your server IP
+const char* serverHost = "122.176.149.247";  // Change to your server IP
 const uint16_t serverPort = 8765;
 
 WiFiClient client;
@@ -55,6 +55,12 @@ void initColors() {
 #define AUDIO_CHUNK_BYTES    (AUDIO_CHUNK_SAMPLES * 1)
 
 #define LIST_TOP_Y 28
+#define LED_PIN 19
+
+// Disconnect reason constants
+#define DISC_WIFI   0
+#define DISC_SERVER 1
+#define DISC_MANUAL 2
 
 // Recording state
 bool isRecording = false;
@@ -74,6 +80,16 @@ float softClipRatio   = 0.5;
 float hpf_prev_input = 0.0;
 float hpf_prev_output = 0.0;
 float lpf_prev_output = 0.0;
+
+// Waveform visualization
+#define WAVEFORM_BARS    45
+#define WAVEFORM_BAR_W   2
+#define WAVEFORM_BAR_GAP 1
+#define WAVEFORM_HEIGHT  100
+#define WAVEFORM_Y       130
+
+uint8_t waveformBuffer[WAVEFORM_BARS] = {0};
+int waveformIndex = 0;
 
 // Protocol magic bytes
 const uint8_t STREAM_START_MAGIC[4] = {0x41, 0x50, 0x53, 0x54}; // "APST"
@@ -221,58 +237,105 @@ bool connectToServer() {
 }
 
 // ==========================================
-//        WAITING SCREEN
+//        DISCONNECTED SCREEN
 // ==========================================
-void drawWaitingScreen(const char* message) {
+void drawLargeWiFiIcon(int cx, int cy, uint16_t color) {
+    StickCP2.Display.drawArc(cx, cy, 24, 21, 220, 320, color);
+    StickCP2.Display.drawArc(cx, cy, 17, 14, 220, 320, color);
+    StickCP2.Display.drawArc(cx, cy, 10, 8, 220, 320, color);
+    StickCP2.Display.fillCircle(cx, cy, 3, color);
+}
+
+void drawLargeServerIcon(int cx, int cy, uint16_t color) {
+    StickCP2.Display.drawRoundRect(cx - 12, cy - 14, 24, 12, 2, color);
+    StickCP2.Display.drawRoundRect(cx - 12, cy + 2, 24, 12, 2, color);
+    StickCP2.Display.fillCircle(cx + 8, cy - 8, 2, color);
+    StickCP2.Display.fillCircle(cx + 8, cy + 8, 2, color);
+    StickCP2.Display.drawLine(cx - 6, cy - 8, cx + 2, cy - 8, color);
+    StickCP2.Display.drawLine(cx - 6, cy + 8, cx + 2, cy + 8, color);
+}
+
+void drawSlash(int cx, int cy, int size, uint16_t color) {
+    for (int t = -1; t <= 1; t++) {
+        StickCP2.Display.drawLine(cx - size + t, cy + size, cx + size + t, cy - size, color);
+    }
+}
+
+void drawDisconnectedScreen(int reason) {
     StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("WAITING");
-    StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_YELLOW);
-    StickCP2.Display.setCursor(6, LIST_TOP_Y);
-    StickCP2.Display.print(message);
+    drawHeader("AiPin");
+
+    int cx = SCREEN_W / 2;
+
+    if (reason == DISC_WIFI) {
+        drawLargeWiFiIcon(cx, 95, C_GRAY);
+        drawSlash(cx, 95, 18, C_RED);
+
+        StickCP2.Display.setTextSize(1);
+        StickCP2.Display.setTextColor(C_RED);
+        StickCP2.Display.setCursor(cx - 21, 125);
+        StickCP2.Display.print("No WiFi");
+
+        StickCP2.Display.setTextColor(C_DARKGRAY);
+        StickCP2.Display.setCursor(cx - 42, 150);
+        StickCP2.Display.print("Reconnecting...");
+    } else if (reason == DISC_SERVER) {
+        drawWiFiIcon(cx - 6, 60, C_GREEN);
+
+        drawLargeServerIcon(cx, 100, C_RED);
+        drawSlash(cx, 100, 14, C_RED);
+
+        StickCP2.Display.setTextSize(1);
+        StickCP2.Display.setTextColor(C_RED);
+        StickCP2.Display.setCursor(cx - 27, 130);
+        StickCP2.Display.print("No Server");
+
+        StickCP2.Display.setTextColor(C_DARKGRAY);
+        StickCP2.Display.setCursor(cx - 42, 155);
+        StickCP2.Display.print("Reconnecting...");
+    } else {
+        StickCP2.Display.setTextSize(1);
+        StickCP2.Display.setTextColor(C_GRAY);
+        StickCP2.Display.setCursor(cx - 36, 100);
+        StickCP2.Display.print("Disconnected");
+    }
+
     drawFooter("---", "---");
 }
 
 // ==========================================
-//        CONNECTED DETAILS SCREEN
+//        CONNECTED SCREEN
 // ==========================================
 void drawConnectedScreen() {
     StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("CONNECTED");
+    drawHeader("AiPin");
 
-    int y = LIST_TOP_Y + 15;
-    int centerX = SCREEN_W / 2;
+    int cx = SCREEN_W / 2;
 
-    // WiFi icon (connected state)
-    drawWiFiIcon(centerX - 6, y, C_GREEN);
+    // Green circle with checkmark
+    StickCP2.Display.fillCircle(cx, 72, 18, C_GREEN);
+    StickCP2.Display.drawLine(cx - 8, 72, cx - 2, 80, C_BLACK);
+    StickCP2.Display.drawLine(cx - 7, 72, cx - 1, 80, C_BLACK);
+    StickCP2.Display.drawLine(cx - 2, 80, cx + 10, 64, C_BLACK);
+    StickCP2.Display.drawLine(cx - 1, 80, cx + 11, 64, C_BLACK);
 
-    y += 25;
+    // "Ready"
+    StickCP2.Display.setTextSize(2);
+    StickCP2.Display.setTextColor(C_WHITE);
+    StickCP2.Display.setCursor(cx - 30, 102);
+    StickCP2.Display.print("Ready");
 
     // WiFi SSID
     StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_GREEN);
+    StickCP2.Display.setTextColor(C_GRAY);
     String ssid = WiFi.SSID();
     if (ssid.length() > 20) ssid = ssid.substring(0, 18) + "..";
-    int nameWidth = ssid.length() * 6;
-    StickCP2.Display.setCursor(centerX - nameWidth/2, y);
+    int nameW = ssid.length() * 6;
+    StickCP2.Display.setCursor(cx - nameW / 2, 130);
     StickCP2.Display.print(ssid.c_str());
-    y += 15;
 
-    // Server status
-    StickCP2.Display.setTextColor(isServerConnected ? C_GREEN : C_YELLOW);
-    String serverStatus = isServerConnected ? "Server: OK" : "Server: --";
-    int statusWidth = serverStatus.length() * 6;
-    StickCP2.Display.setCursor(centerX - statusWidth/2, y);
-    StickCP2.Display.print(serverStatus.c_str());
-    y += 20;
-
-    // Signal strength visualization
-    int rssi = WiFi.RSSI();
-    drawWiFiBars(centerX - 6, y, rssi);
-    y += 15;
-    StickCP2.Display.setTextColor(C_DARKGRAY);
-    StickCP2.Display.setCursor(centerX - 15, y);
-    StickCP2.Display.printf("%d dBm", rssi);
+    // Signal bars
+    drawWiFiBars(cx - 6, 148, WiFi.RSSI());
 
     drawFooter("Rec", "Disc");
 }
@@ -342,71 +405,76 @@ void sendStreamStop() {
 // ==========================================
 //        RECORDING SCREEN
 // ==========================================
+void drawWaveform() {
+    int totalW = WAVEFORM_BARS * (WAVEFORM_BAR_W + WAVEFORM_BAR_GAP) - WAVEFORM_BAR_GAP;
+    int startX = (SCREEN_W - totalW) / 2;
+    int centerY = WAVEFORM_Y;
+    int halfH = WAVEFORM_HEIGHT / 2;
+
+    // Clear waveform area
+    StickCP2.Display.fillRect(0, centerY - halfH, SCREEN_W, WAVEFORM_HEIGHT, C_BLACK);
+
+    // Center line
+    StickCP2.Display.drawLine(startX, centerY, startX + totalW, centerY, C_DARKGRAY);
+
+    for (int i = 0; i < WAVEFORM_BARS; i++) {
+        int idx = (waveformIndex + i) % WAVEFORM_BARS;
+        int barH = map(waveformBuffer[idx], 0, 255, 1, halfH);
+        int x = startX + i * (WAVEFORM_BAR_W + WAVEFORM_BAR_GAP);
+
+        uint16_t color;
+        if (waveformBuffer[idx] > 200) color = C_RED;
+        else if (waveformBuffer[idx] > 120) color = C_YELLOW;
+        else color = C_GREEN;
+
+        // Symmetric bars above and below center
+        StickCP2.Display.fillRect(x, centerY - barH, WAVEFORM_BAR_W, barH, color);
+        StickCP2.Display.fillRect(x, centerY + 1, WAVEFORM_BAR_W, barH, color);
+    }
+}
+
 void drawRecordingScreen() {
     StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader("RECORDING");
+    drawHeader("REC");
 
-    int y = LIST_TOP_Y + 10;
-    int centerX = SCREEN_W / 2;
+    int cx = SCREEN_W / 2;
 
-    // Red recording circle (pulsing indicator)
-    StickCP2.Display.fillCircle(centerX - 25, y + 8, 6, C_RED);
-
-    // Microphone icon
-    drawMicIcon(centerX - 6, y + 2, C_RED);
+    // Red recording dot in header
+    StickCP2.Display.fillCircle(32, 11, 3, C_RED);
 
     // Duration timer
     StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(centerX - 30, y + 22);
+    StickCP2.Display.setCursor(cx - 30, 32);
     StickCP2.Display.print("00:00");
 
-    y += 50;
-
-    // Status icons row
-    StickCP2.Display.setTextSize(1);
-    int iconY = y;
-
-    // WiFi icon + text
-    drawWiFiIcon(12, iconY, C_CYAN);
-    StickCP2.Display.setTextColor(C_CYAN);
-    StickCP2.Display.setCursor(26, iconY + 2);
-    StickCP2.Display.print("TCP");
-
-    // Wave icon + sample rate
-    drawWaveIcon(58, iconY, C_GRAY);
-    StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(72, iconY + 2);
-    StickCP2.Display.print("8k");
-
-    // Filter icon (noise reduction)
-    drawFilterIcon(104, iconY, C_GREEN);
-    StickCP2.Display.setTextColor(C_GREEN);
-    StickCP2.Display.setCursor(118, iconY + 2);
-    StickCP2.Display.print("NR");
+    // Initial flat waveform
+    drawWaveform();
 
     drawFooter("Stop", "Disc");
 }
 
-void updateRecordingTimer() {
+void updateRecordingDisplay() {
     unsigned long elapsed = (millis() - recordStartMillis) / 1000;
     unsigned int mins = elapsed / 60;
     unsigned int secs = elapsed % 60;
 
-    int centerX = SCREEN_W / 2;
-    int timerY = LIST_TOP_Y + 32;
+    int cx = SCREEN_W / 2;
 
-    StickCP2.Display.fillRect(centerX - 30, timerY, 60, 16, C_BLACK);
+    // Update timer
+    StickCP2.Display.fillRect(cx - 30, 32, 60, 16, C_BLACK);
     StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(centerX - 30, timerY);
+    StickCP2.Display.setCursor(cx - 30, 32);
     StickCP2.Display.printf("%02d:%02d", mins, secs);
 
-    // Blink the red recording dot
+    // Blink recording dot in header
     bool dotVisible = ((millis() / 500) % 2 == 0);
-    uint16_t dotColor = dotVisible ? C_RED : C_BLACK;
-    int dotY = LIST_TOP_Y + 18;
-    StickCP2.Display.fillCircle(centerX - 25, dotY, 6, dotColor);
+    uint16_t headerBg = StickCP2.Display.color565(20, 20, 60);
+    StickCP2.Display.fillCircle(32, 11, 3, dotVisible ? C_RED : headerBg);
+
+    // Update waveform
+    drawWaveform();
 }
 
 // ==========================================
@@ -425,17 +493,23 @@ void startRecording() {
     hpf_prev_output = 0.0;
     lpf_prev_output = 0.0;
 
+    // Reset waveform
+    memset(waveformBuffer, 0, sizeof(waveformBuffer));
+    waveformIndex = 0;
+
     // Send stream start header over TCP
     sendStreamHeader();
 
     isRecording = true;
     recordStartMillis = millis();
+    digitalWrite(LED_PIN, HIGH);
 
     drawRecordingScreen();
 }
 
 void stopRecording() {
     isRecording = false;
+    digitalWrite(LED_PIN, LOW);
 
     // Wait for any in-progress capture to finish
     while (StickCP2.Mic.isRecording()) {
@@ -478,7 +552,16 @@ void captureAndStreamChunk() {
             txBuffer[i] = (int8_t)(tempBuffer[i] >> 8);
         }
 
-        // 4. Send over TCP
+        // 4. Compute waveform peak
+        int16_t peak = 0;
+        for (int i = 0; i < AUDIO_CHUNK_SAMPLES; i++) {
+            int16_t absVal = abs(tempBuffer[i]);
+            if (absVal > peak) peak = absVal;
+        }
+        waveformBuffer[waveformIndex] = map(constrain(peak, 0, 32767), 0, 32767, 0, 255);
+        waveformIndex = (waveformIndex + 1) % WAVEFORM_BARS;
+
+        // 5. Send over TCP
         size_t written = client.write((uint8_t*)txBuffer, AUDIO_CHUNK_SAMPLES);
 
         // Debug logging
@@ -498,6 +581,7 @@ void disconnectDevice() {
     // If recording, stop mic and send stop marker before disconnecting
     if (isRecording) {
         isRecording = false;
+        digitalWrite(LED_PIN, LOW);
         while (StickCP2.Mic.isRecording()) { delay(1); }
         StickCP2.Mic.end();
         StickCP2.Speaker.begin();
@@ -513,7 +597,7 @@ void disconnectDevice() {
     delay(50);
     StickCP2.Speaker.tone(400, 100);
 
-    drawWaitingScreen("Disconnected.");
+    drawDisconnectedScreen(DISC_MANUAL);
 }
 
 // ==========================================
@@ -530,6 +614,10 @@ void setup() {
     StickCP2.Display.setTextSize(1);
 
     initColors();
+
+    // LED indicator
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
 
     // Splash screen
     StickCP2.Display.fillScreen(C_BLACK);
@@ -561,77 +649,10 @@ void setup() {
             StickCP2.Speaker.tone(2000, 80);
             drawConnectedScreen();
         } else {
-            drawWaitingScreen("Server offline");
+            drawDisconnectedScreen(DISC_SERVER);
         }
     } else {
-        drawWaitingScreen("WiFi not found");
-    }
-}
-
-// ==========================================
-//        SERIAL COMMAND INTERFACE
-// ==========================================
-String serialCmdBuf = "";
-
-void handleSerialCommands() {
-    while (Serial.available()) {
-        char c = Serial.read();
-        if (c == '\n' || c == '\r') {
-            serialCmdBuf.trim();
-            if (serialCmdBuf.length() > 0) {
-                processSerialCommand(serialCmdBuf);
-                serialCmdBuf = "";
-            }
-        } else {
-            serialCmdBuf += c;
-        }
-    }
-}
-
-void processSerialCommand(const String& cmd) {
-    int spaceIdx = cmd.indexOf(' ');
-    String key = (spaceIdx > 0) ? cmd.substring(0, spaceIdx) : cmd;
-    
-    if (key == "server") {
-        // Allow changing server at runtime: "server 192.168.1.50:8765"
-        String val = cmd.substring(spaceIdx + 1);
-        int colonIdx = val.indexOf(':');
-        if (colonIdx > 0) {
-            String host = val.substring(0, colonIdx);
-            int port = val.substring(colonIdx + 1).toInt();
-            Serial.printf("[AiPin] New server: %s:%d\n", host.c_str(), port);
-            // Note: Would need to reconnect to apply
-        }
-    } else if (key == "reconnect") {
-        if (isWiFiConnected) {
-            client.stop();
-            isServerConnected = connectToServer();
-            if (isServerConnected) {
-                drawConnectedScreen();
-            }
-        }
-    } else if (key == "status") {
-        Serial.printf("[AiPin] WiFi: %s, Server: %s, Recording: %s\n",
-                      isWiFiConnected ? "connected" : "disconnected",
-                      isServerConnected ? "connected" : "disconnected",
-                      isRecording ? "yes" : "no");
-    } else {
-        float val = (spaceIdx > 0) ? cmd.substring(spaceIdx + 1).toFloat() : 0;
-        
-        if (key == "gain")       { audioGain = val; }
-        else if (key == "gate")  { noiseGateThresh = val; }
-        else if (key == "hpf")   { hpfAlpha = val; }
-        else if (key == "lpf")   { lpfAlpha = val; }
-        else if (key == "knee")  { softClipKnee = val; }
-        else if (key == "ratio") { softClipRatio = val; }
-        else if (key == "audio") { /* just print */ }
-        else {
-            Serial.println("[AiPin] Commands: gain|gate|hpf|lpf|knee|ratio|audio|server|reconnect|status");
-            return;
-        }
-
-        Serial.printf("[AiPin] Audio: gain=%.1f gate=%.0f hpf=%.3f lpf=%.3f knee=%.0f ratio=%.2f\n",
-                      audioGain, noiseGateThresh, hpfAlpha, lpfAlpha, softClipKnee, softClipRatio);
+        drawDisconnectedScreen(DISC_WIFI);
     }
 }
 
@@ -640,7 +661,6 @@ void processSerialCommand(const String& cmd) {
 // ==========================================
 void loop() {
     StickCP2.update();
-    handleSerialCommands();
 
     // Check WiFi connection
     if (WiFi.status() != WL_CONNECTED) {
@@ -651,7 +671,7 @@ void loop() {
                 stopRecording();
             }
             Serial.println("[AiPin] WiFi connection lost");
-            drawWaitingScreen("WiFi lost");
+            drawDisconnectedScreen(DISC_WIFI);
         }
         
         // Try to reconnect periodically
@@ -679,7 +699,7 @@ void loop() {
                 stopRecording();
             }
             Serial.println("[AiPin] Server connection lost");
-            drawWaitingScreen("Server lost");
+            drawDisconnectedScreen(DISC_SERVER);
         }
         
         // Try to reconnect periodically
@@ -700,10 +720,10 @@ void loop() {
     if (isRecording) {
         captureAndStreamChunk();
 
-        static unsigned long lastTimerUpdate = 0;
-        if (millis() - lastTimerUpdate > 1000) {
-            updateRecordingTimer();
-            lastTimerUpdate = millis();
+        static unsigned long lastDisplayUpdate = 0;
+        if (millis() - lastDisplayUpdate > 150) {
+            updateRecordingDisplay();
+            lastDisplayUpdate = millis();
         }
 
         if (StickCP2.BtnA.wasPressed()) {
