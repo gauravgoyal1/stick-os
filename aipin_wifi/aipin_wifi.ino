@@ -246,6 +246,11 @@ bool connectToServer() {
 // ==========================================
 void syncNTPTime() {
     Serial.println("[AiPin] Syncing NTP time...");
+    
+    // Reset any previous time settings
+    struct timeval tv = { 0, 0 };
+    settimeofday(&tv, NULL);
+    
     configTime(19800, 0, "time.google.com", "pool.ntp.org");
     delay(2000);
 
