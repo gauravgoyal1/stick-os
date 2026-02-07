@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import logging
+import os
 import struct
 import sys
 import time
@@ -20,6 +21,15 @@ from datetime import datetime
 from pathlib import Path
 
 log = logging.getLogger("aipin")
+
+# Load .env file if present
+_env_path = Path(__file__).parent / '.env'
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            key, _, value = line.partition('=')
+            os.environ.setdefault(key.strip(), value.strip())
 
 try:
     import serial
@@ -186,6 +196,61 @@ def receive_audio(ser, sample_rate, bit_depth, channels, output_path):
     print(f"Saved: {output_path}")
 
 
+def transcribe_audio(audio_path, transcript_dir):
+    """Transcribe audio using Gemini REST API and save transcript as a text file."""
+    import base64
+    import json
+    import requests
+
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        print("Warning: GEMINI_API_KEY not set. Skipping transcription.")
+        return None
+
+    transcript_dir = Path(transcript_dir)
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Transcribing {audio_path}...")
+
+    audio_b64 = base64.b64encode(Path(audio_path).read_bytes()).decode()
+    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+           "gemini-2.0-flash:streamGenerateContent?alt=sse&key=" + api_key)
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": "Transcribe this audio. Output only the transcription text, nothing else."},
+                {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
+            ]
+        }]
+    }
+
+    resp = requests.post(url, json=payload, stream=True, timeout=60)
+    if resp.status_code != 200:
+        print(f"Gemini API error {resp.status_code}: {resp.text[:200]}")
+        return None
+
+    print("--- Transcription ---")
+    full_text = []
+    for line in resp.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data: "):
+            continue
+        try:
+            chunk = json.loads(line[len("data: "):])
+            text = chunk["candidates"][0]["content"]["parts"][0].get("text", "")
+            print(text, end='', flush=True)
+            full_text.append(text)
+        except (json.JSONDecodeError, KeyError, IndexError):
+            continue
+    print("\n--- End ---")
+
+    transcript_name = Path(audio_path).stem + '.txt'
+    transcript_path = transcript_dir / transcript_name
+    transcript_path.write_text(''.join(full_text))
+
+    print(f"Transcript saved: {transcript_path}")
+    return transcript_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AiPin Audio Receiver - Receive BT audio and save as WAV"
@@ -200,6 +265,8 @@ def main():
                         help='Baud rate (default: 115200)')
     parser.add_argument('--once', action='store_true',
                         help='Exit after first recording (default: keep listening)')
+    parser.add_argument('--no-transcribe', action='store_true',
+                        help='Skip Gemini transcription')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable debug logging')
     args = parser.parse_args()
@@ -224,50 +291,70 @@ def main():
         output_dir = Path(args.output)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Opening serial port: {args.port}")
-    try:
-        ser = serial.Serial(
-            port=args.port,
-            baudrate=args.baud,
-            timeout=1.0,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE
-        )
-    except serial.SerialException as e:
-        print(f"Error opening serial port: {e}")
-        sys.exit(1)
+    def open_serial(port, baud):
+        """Open serial port, retrying until the device appears."""
+        while True:
+            try:
+                ser = serial.Serial(
+                    port=port,
+                    baudrate=baud,
+                    timeout=1.0,
+                    bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE
+                )
+                time.sleep(0.5)
+                ser.reset_input_buffer()
+                ser.reset_output_buffer()
+                ser.dtr = True
+                ser.rts = True
+                print(f"Connected to {port} @ {baud} baud")
+                log.debug(f"Port details: DSR={ser.dsr}, CTS={ser.cts}, "
+                          f"RI={ser.ri}, CD={ser.cd}")
+                return ser
+            except serial.SerialException:
+                time.sleep(1)
 
-    print(f"Connected to {args.port} @ {args.baud} baud")
-    log.debug(f"Port details: DSR={ser.dsr}, CTS={ser.cts}, RI={ser.ri}, CD={ser.cd}")
-    log.debug(f"  timeout={ser.timeout}s, bytesize={ser.bytesize}, "
-              f"parity={ser.parity}, stopbits={ser.stopbits}")
     print(f"Output: {args.output}")
+    print(f"Opening serial port: {args.port}")
+    ser = open_serial(args.port, args.baud)
 
     try:
         recording_count = 0
         while True:
-            header = wait_for_header(ser)
-            if header is None:
-                print("Failed to receive valid header. Retrying...")
-                continue
+            try:
+                header = wait_for_header(ser)
+                if header is None:
+                    print("Failed to receive valid header. Retrying...")
+                    continue
 
-            sample_rate, bit_depth, channels = header
-            print(f"Header received: {sample_rate}Hz, {bit_depth}-bit, {channels}ch")
+                sample_rate, bit_depth, channels = header
+                print(f"Header received: {sample_rate}Hz, {bit_depth}-bit, {channels}ch")
 
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            if output_dir:
-                output_path = output_dir / f'aipin_{timestamp}.wav'
-            else:
-                output_path = Path(args.output)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                if output_dir:
+                    output_path = output_dir / f'aipin_{timestamp}.wav'
+                else:
+                    output_path = Path(args.output)
 
-            receive_audio(ser, sample_rate, bit_depth, channels, output_path)
-            recording_count += 1
+                receive_audio(ser, sample_rate, bit_depth, channels, output_path)
+                recording_count += 1
 
-            if args.once:
-                break
+                if not args.no_transcribe:
+                    transcribe_audio(output_path, 'transcripts')
 
-            print("\nWaiting for next recording...")
+                if args.once:
+                    break
+
+                print("\nWaiting for next recording...")
+
+            except (serial.SerialException, OSError):
+                print("\nDevice disconnected. Waiting for reconnect...")
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+                ser = open_serial(args.port, args.baud)
 
     except KeyboardInterrupt:
         print("\nExiting.")

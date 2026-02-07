@@ -12,6 +12,8 @@ Thumbs.db
 # Python virtual environment
 venv/
 recordings/
+transcripts/
+.env
 
 # IDE files
 *.swp
