@@ -16,6 +16,7 @@ WiFiCredentials wifiNetworks[] = {
     {"REDACTED-WIFI", "REDACTED-WIFI-PW"},
     {"REDACTED-WIFI", "REDACTED-WIFI"},
     {"Mischief Managed", "Alohamora@404"},
+    {"Pravis_Aruba", "Pravis@88"}
     // Add more networks as needed
 };
 const int numNetworks = sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
@@ -308,6 +309,66 @@ void drawSlash(int cx, int cy, int size, uint16_t color) {
     }
 }
 
+void drawAvailableNetworks() {
+    int n = WiFi.scanNetworks();
+    
+    int startY = 100;
+    int maxNetworks = 5;  // Limit to 5 networks to fit on screen
+    
+    StickCP2.Display.setTextSize(1);
+    StickCP2.Display.setTextColor(C_GRAY);
+    StickCP2.Display.setCursor(6, startY - 15);
+    StickCP2.Display.print("Available Networks:");
+    
+    if (n == 0) {
+        StickCP2.Display.setTextColor(C_DARKGRAY);
+        StickCP2.Display.setCursor(6, startY);
+        StickCP2.Display.print("No networks found");
+    } else {
+        int displayCount = min(n, maxNetworks);
+        for (int i = 0; i < displayCount; i++) {
+            int y = startY + (i * 18);
+            int rssi = WiFi.RSSI(i);
+            
+            // Check if this is a known network
+            bool isKnown = false;
+            String foundSSID = WiFi.SSID(i);
+            for (int j = 0; j < numNetworks; j++) {
+                if (foundSSID == wifiNetworks[j].ssid) {
+                    isKnown = true;
+                    break;
+                }
+            }
+            
+            // Draw signal strength bars
+            drawWiFiBars(6, y, rssi);
+            
+            // Draw SSID name
+            String ssid = foundSSID;
+            if (ssid.length() > 14) ssid = ssid.substring(0, 12) + "..";
+            
+            StickCP2.Display.setTextColor(isKnown ? C_CYAN : C_WHITE);
+            StickCP2.Display.setCursor(22, y + 2);
+            StickCP2.Display.print(ssid.c_str());
+            
+            // Show star for known networks
+            if (isKnown) {
+                StickCP2.Display.setCursor(SCREEN_W - 12, y + 2);
+                StickCP2.Display.print("*");
+            }
+        }
+        
+        // Show count if there are more networks
+        if (n > maxNetworks) {
+            StickCP2.Display.setTextColor(C_DARKGRAY);
+            StickCP2.Display.setCursor(6, startY + (maxNetworks * 18));
+            StickCP2.Display.printf("+%d more", n - maxNetworks);
+        }
+    }
+    
+    WiFi.scanDelete();  // Free scan results memory
+}
+
 void drawDisconnectedScreen(int reason) {
     StickCP2.Display.fillScreen(C_BLACK);
     drawHeader();
@@ -315,17 +376,25 @@ void drawDisconnectedScreen(int reason) {
     int cx = SCREEN_W / 2;
 
     if (reason == DISC_WIFI) {
-        drawLargeWiFiIcon(cx, 95, C_GRAY);
-        drawSlash(cx, 95, 18, C_RED);
-
+        // Compact header for WiFi disconnected
         StickCP2.Display.setTextSize(1);
         StickCP2.Display.setTextColor(C_RED);
-        StickCP2.Display.setCursor(cx - 21, 125);
-        StickCP2.Display.print("No WiFi");
-
+        StickCP2.Display.setCursor(6, 30);
+        StickCP2.Display.print("WiFi Disconnected");
+        
+        // Draw small WiFi icon with slash
+        drawWiFiIcon(SCREEN_W - 20, 26, C_GRAY);
+        StickCP2.Display.drawLine(SCREEN_W - 20, 38, SCREEN_W - 8, 26, C_RED);
+        
+        // Scanning indicator
         StickCP2.Display.setTextColor(C_DARKGRAY);
-        StickCP2.Display.setCursor(cx - 42, 150);
-        StickCP2.Display.print("Reconnecting...");
+        StickCP2.Display.setCursor(6, 50);
+        StickCP2.Display.print("Scanning...");
+        
+        // Draw available networks
+        StickCP2.Display.setCursor(6, 70);
+        drawAvailableNetworks();
+        
     } else if (reason == DISC_SERVER) {
         drawWiFiIcon(cx - 6, 60, C_GREEN);
 
