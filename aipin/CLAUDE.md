@@ -2,10 +2,27 @@
 
 AiPin is an audio-capture device built on the M5StickC Plus 2. Two firmware variants (`bl/` and `wifi/`) stream audio to a host using the same APST/APND protocol; the matching host-side receiver lives in `server/` (Python, WiFi variant) and `bl/receiver.py` (Python, BT variant).
 
+## Config bootstrap
+
+WiFi credentials and the TCP server endpoint live in two gitignored headers:
+
+- `libraries/wifi_config/wifi_config.h` — SSIDs and passwords (priority list)
+- `libraries/secrets_config/secrets_config.h` — `kAiPinServerHost` / `kAiPinServerPort`
+
+On a fresh clone, copy the tracked `.example` templates and fill in real values:
+
+```bash
+cp libraries/wifi_config/wifi_config.h.example libraries/wifi_config/wifi_config.h
+cp libraries/secrets_config/secrets_config.h.example libraries/secrets_config/secrets_config.h
+# Then edit both files with your WiFi list and server IP.
+```
+
+Without these files, `aipin/wifi` fails to compile with `wifi_config.h: No such file or directory`.
+
 ## Sub-dirs
 
 - `bl/` — Bluetooth SPP audio streamer. Runs as a BT slave ("AiPin"), Mac connects by opening `/dev/cu.AiPin`. `bl/receiver.py` is the matching host-side receiver. Primary sketch: `bl.ino`.
-- `wifi/` — WiFi + TCP audio streamer. Connects to a hardcoded known WiFi network and streams to a TCP server. Primary sketch: `wifi.ino`. **Update WiFi credentials and server IP in `wifi.ino` before deploying.**
+- `wifi/` — WiFi + TCP audio streamer. Scans for known networks (see `libraries/wifi_config/wifi_config.h`) and streams to the server configured in `libraries/secrets_config/secrets_config.h`. Primary sketch: `wifi.ino`. Both config files are gitignored; populate from their `.example` templates on a fresh clone.
 - `server/` — Python TCP server. Receives WiFi audio streams, saves `.wav` files, optionally transcribes with Gemini AI (speaker diarization). Requires `GEMINI_API_KEY` in `.env` at the repo root.
 
 ## Build & Upload
@@ -37,7 +54,7 @@ All screens follow `drawHeader()` / content / `drawFooter()` structure. Header s
 - **Speaker and microphone share GPIO 0.** `Speaker.end()` must be called before `Mic.begin()` and vice versa.
 - Colors are initialized via `initColors()` after display init — use the `C_*` globals, not raw color constants.
 - Audio processing parameters are tunable at runtime via Serial commands: `gain`, `gate`, `hpf`, `lpf`, `knee`, `ratio`, `audio`.
-- WiFi variant: credentials and server IP are hardcoded in `wifi.ino` — update before deploying.
+- WiFi variant: credentials live in `libraries/wifi_config/wifi_config.h`, server host/port in `libraries/secrets_config/secrets_config.h`. Both gitignored; copy from `.example` on a fresh clone.
 
 ## Host-side receivers
 

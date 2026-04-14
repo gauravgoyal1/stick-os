@@ -1,0 +1,20 @@
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+
+// Copy this file to wifi_config.h and fill in your networks.
+// wifi_config.h is gitignored so your credentials won't be committed.
+
+struct WiFiCredentials {
+  const char* ssid;
+  const char* password;
+};
+
+// Priority-ordered list. Sketches scan for visible SSIDs and connect
+// to the first match in this list.
+static constexpr WiFiCredentials kWiFiNetworks[] = {
+  {"YOUR_SSID_HERE", "YOUR_PASSWORD_HERE"},
+  // Add more networks as needed.
+};
+static constexpr size_t kWiFiNetworkCount =
+    sizeof(kWiFiNetworks) / sizeof(kWiFiNetworks[0]);
