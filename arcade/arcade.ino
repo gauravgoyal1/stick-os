@@ -2,12 +2,11 @@
 #include <EEPROM.h>
 #include <WiFi.h>
 #include <time.h>
+#include <wifi_config.h>
 
 // ==========================================
 //            WIFI CONFIGURATION
 // ==========================================
-const char* WIFI_SSID = "REDACTED-WIFI";
-const char* WIFI_PASS = "REDACTED-WIFI-PW";
 
 // WiFi State
 bool wifiConnected = false;
@@ -76,7 +75,21 @@ void connectWiFi() {
     StickCP2.Display.setCursor(20, 50);
     StickCP2.Display.print("Connecting WiFi...");
     
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    // Scan for visible SSIDs and connect to the first known one.
+    int numScanned = WiFi.scanNetworks();
+    bool attempted = false;
+    for (int i = 0; i < numScanned && !attempted; i++) {
+      String found = WiFi.SSID(i);
+      for (size_t j = 0; j < kWiFiNetworkCount; j++) {
+        if (found == kWiFiNetworks[j].ssid) {
+          WiFi.begin(kWiFiNetworks[j].ssid, kWiFiNetworks[j].password);
+          attempted = true;
+          break;
+        }
+      }
+    }
+    // If nothing matched, WiFi stays disconnected. The surrounding code
+    // already polls WiFi.status() so the existing retry logic handles it.
     
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
