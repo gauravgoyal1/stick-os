@@ -1,9 +1,9 @@
 #include <M5StickCPlus2.h>
 #include <WiFi.h>
-#include <time.h>
 
 #include <wifi_config.h>
 #include <secrets_config.h>
+#include <stick_net.h>
 #include "aipin_wifi_app.h"
 
 namespace AiPinWifiApp {
@@ -168,51 +168,8 @@ void drawFooter(const char* btnALabel, const char* btnBLabel) {
 }
 
 // ==========================================
-//        WIFI CONNECTION
+//        SERVER CONNECTION
 // ==========================================
-bool connectToWiFi() {
-    Serial.println("[AiPin] Scanning for known WiFi networks...");
-    
-    int n = WiFi.scanNetworks();
-    if (n == 0) {
-        Serial.println("[AiPin] No networks found");
-        return false;
-    }
-    
-    Serial.printf("[AiPin] Found %d networks\n", n);
-    
-    // Try to connect to a known network
-    for (int i = 0; i < n; i++) {
-        String foundSSID = WiFi.SSID(i);
-        Serial.printf("[AiPin] Checking: %s\n", foundSSID.c_str());
-        
-        for (size_t j = 0; j < kWiFiNetworkCount; j++) {
-            if (foundSSID == kWiFiNetworks[j].ssid) {
-                Serial.printf("[AiPin] Attempting to connect to: %s\n", kWiFiNetworks[j].ssid);
-                
-                WiFi.begin(kWiFiNetworks[j].ssid, kWiFiNetworks[j].password);
-                
-                int attempts = 0;
-                while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-                    delay(500);
-                    Serial.print(".");
-                    attempts++;
-                }
-                
-                if (WiFi.status() == WL_CONNECTED) {
-                    Serial.printf("\n[AiPin] Connected to: %s\n", kWiFiNetworks[j].ssid);
-                    Serial.printf("[AiPin] IP: %s\n", WiFi.localIP().toString().c_str());
-                    return true;
-                }
-                
-                Serial.println("\n[AiPin] Connection failed, trying next...");
-            }
-        }
-    }
-    
-    return false;
-}
-
 bool connectToServer() {
     Serial.printf("[AiPin] Connecting to server %s:%d\n", kAiPinServerHost, kAiPinServerPort);
     
@@ -223,48 +180,6 @@ bool connectToServer() {
     
     Serial.println("[AiPin] Server connection failed");
     return false;
-}
-
-// ==========================================
-//        NTP TIME SYNC
-// ==========================================
-void syncNTPTime() {
-    Serial.println("[AiPin] Syncing NTP time...");
-    
-    // Reset any previous time settings
-    struct timeval tv = { 0, 0 };
-    settimeofday(&tv, NULL);
-    
-    configTime(19800, 0, "time.google.com", "pool.ntp.org");
-    delay(2000);
-
-    struct tm timeinfo = { 0 };
-    int attempts = 0;
-    bool success = false;
-
-    while (attempts < 10 && !success) {
-        if (getLocalTime(&timeinfo, 2000)) {
-            if (timeinfo.tm_year + 1900 >= 2024) {
-                success = true;
-            }
-        }
-        attempts++;
-        delay(500);
-    }
-
-    if (success) {
-        m5::rtc_datetime_t dt;
-        dt.date.year = timeinfo.tm_year + 1900;
-        dt.date.month = timeinfo.tm_mon + 1;
-        dt.date.date = timeinfo.tm_mday;
-        dt.time.hours = timeinfo.tm_hour;
-        dt.time.minutes = timeinfo.tm_min;
-        dt.time.seconds = timeinfo.tm_sec;
-        StickCP2.Rtc.setDateTime(dt);
-        Serial.printf("[AiPin] Time synced: %02d:%02d\n", timeinfo.tm_hour, timeinfo.tm_min);
-    } else {
-        Serial.println("[AiPin] NTP sync failed");
-    }
 }
 
 // ==========================================
@@ -708,10 +623,8 @@ void disconnectDevice() {
 //              SETUP
 // ==========================================
 void init() {
-    Serial.begin(115200);
     Serial.println("\n[AiPin] Booting (WiFi mode)...");
 
-    StickCP2.begin();
     StickCP2.Speaker.begin();
     StickCP2.Speaker.setVolume(120);
     StickCP2.Display.setRotation(0);
@@ -723,34 +636,26 @@ void init() {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
 
-    // Splash screen
     StickCP2.Display.fillScreen(C_BLACK);
-    StickCP2.Display.setTextSize(2);
-    StickCP2.Display.setTextColor(C_CYAN);
-    StickCP2.Display.setCursor(37, 70);
-    StickCP2.Display.print("AiPin");
-    StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(12, 110);
-    StickCP2.Display.print("WiFi Audio Streamer");
-    StickCP2.Display.setCursor(13, 140);
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.print("Connecting WiFi...");
-    delay(1000);
 
-    // Connect to WiFi
-    WiFi.mode(WIFI_STA);
-    isWiFiConnected = connectToWiFi();
+    // Wait for the shared background bring-up kicked off by stick.ino.
+    // If we were flashed standalone (no stick wrapper), startAsync() was
+    // never called — waitForReady() returns instantly and we fall through
+    // to a direct connect. No splash text: the launcher already showed
+    // WiFi/NTP status while the user was picking an app.
+    StickNet::waitForReady();
+    isWiFiConnected = StickNet::isWiFiReady();
+    if (!isWiFiConnected) isWiFiConnected = StickNet::connectWiFi();
 
     if (isWiFiConnected) {
-        StickCP2.Display.setCursor(13, 155);
-        StickCP2.Display.print("Syncing time...");
-        syncNTPTime();
+        StickNet::syncNTP();  // idempotent — no-op if already synced
 
-        StickCP2.Display.setCursor(13, 170);
-        StickCP2.Display.print("Connecting server...");
+        // connectToServer() is a blocking TCP connect that can take ~1s.
+        // Show the disconnected/server screen immediately so the user
+        // sees the UI instead of a blank frame during the dial.
+        drawDisconnectedScreen(DISC_SERVER);
         isServerConnected = connectToServer();
-        
+
         if (isServerConnected) {
             StickCP2.Speaker.tone(1500, 80);
             delay(80);
@@ -768,8 +673,6 @@ void init() {
 //              MAIN LOOP
 // ==========================================
 void tick() {
-    StickCP2.update();
-
     // Check WiFi connection
     if (WiFi.status() != WL_CONNECTED) {
         if (isWiFiConnected) {
@@ -785,7 +688,7 @@ void tick() {
         // Try to reconnect periodically
         static unsigned long lastWiFiRetry = 0;
         if (millis() - lastWiFiRetry > 10000) {
-            isWiFiConnected = connectToWiFi();
+            isWiFiConnected = StickNet::connectWiFi();
             if (isWiFiConnected) {
                 isServerConnected = connectToServer();
                 if (isServerConnected) {

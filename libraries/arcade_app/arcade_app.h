@@ -7,8 +7,8 @@
 // not be referenced from outside.
 namespace ArcadeApp {
 
-// Called once after the sketch wrapper calls StickCP2.begin().
-// Owns: display rotation, EEPROM, WiFi/NTP, audio setup.
+// Called once after the sketch wrapper calls StickCP2.begin() + Serial.begin().
+// Owns: display rotation, EEPROM, WiFi/NTP (via StickNet), audio setup.
 // Must tolerate peripherals being in an arbitrary state on entry.
 void init();
 

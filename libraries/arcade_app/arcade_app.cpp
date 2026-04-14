@@ -1,8 +1,7 @@
 #include <M5StickCPlus2.h>
 #include <EEPROM.h>
 #include <WiFi.h>
-#include <time.h>
-#include <wifi_config.h>
+#include <stick_net.h>
 #include "arcade_app.h"
 
 namespace ArcadeApp {
@@ -71,51 +70,14 @@ void initColors() {
     birdSprite[23] = C_RED; birdSprite[31] = C_RED; 
 }
 
-// WiFi Connection Helper
+// WiFi Connection Helper — silent. stick.ino already ran bring-up on a
+// background task before showing the home screen; we just read the
+// result. The standalone `arcade` wrapper never calls startAsync, so
+// StickNet::connectWiFi() below handles that fallback.
 void connectWiFi() {
-    StickCP2.Display.fillScreen(C_BLACK);
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(20, 50);
-    StickCP2.Display.print("Connecting WiFi...");
-    
-    // Scan for visible SSIDs and connect to the first known one.
-    int numScanned = WiFi.scanNetworks();
-    bool attempted = false;
-    for (int i = 0; i < numScanned && !attempted; i++) {
-      String found = WiFi.SSID(i);
-      for (size_t j = 0; j < kWiFiNetworkCount; j++) {
-        if (found == kWiFiNetworks[j].ssid) {
-          WiFi.begin(kWiFiNetworks[j].ssid, kWiFiNetworks[j].password);
-          attempted = true;
-          break;
-        }
-      }
-    }
-    // If nothing matched, WiFi stays disconnected. The surrounding code
-    // already polls WiFi.status() so the existing retry logic handles it.
-    
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-        delay(500);
-        StickCP2.Display.print(".");
-        attempts++;
-    }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiConnected = true;
-        StickCP2.Display.fillScreen(C_BLACK);
-        StickCP2.Display.setCursor(20, 50);
-        StickCP2.Display.setTextColor(C_GREEN);
-        StickCP2.Display.print("WiFi Connected!");
-        delay(500);
-    } else {
-        wifiConnected = false;
-        StickCP2.Display.fillScreen(C_BLACK);
-        StickCP2.Display.setCursor(20, 50);
-        StickCP2.Display.setTextColor(C_RED);
-        StickCP2.Display.print("WiFi Failed");
-        delay(1000);
-    }
+    StickNet::waitForReady();
+    wifiConnected = StickNet::isWiFiReady();
+    if (!wifiConnected) wifiConnected = StickNet::connectWiFi();
 }
 
 // Update WiFi signal strength (0-4 bars)
@@ -134,71 +96,11 @@ void updateWiFiSignal() {
     }
 }
 
-// Sync time from NTP server  
+// NTP — silent. Idempotent via StickNet::syncNTP(); no-op if stick
+// already synced on the background task.
 void syncNTPTime() {
     if (!wifiConnected) return;
-    
-    StickCP2.Display.fillScreen(C_BLACK);
-    StickCP2.Display.setTextColor(C_CYAN);
-    StickCP2.Display.setCursor(20, 40);
-    StickCP2.Display.print("Syncing NTP...");
-    
-    // Reset any previous time settings
-    struct timeval tv = { 0, 0 };
-    settimeofday(&tv, NULL);
-    
-    // Configure NTP: GMT offset = 5.5 hours = 19800 seconds for IST
-    configTime(19800, 0, "time.google.com", "pool.ntp.org");
-    
-    // Wait 3 seconds for initial NTP request
-    delay(3000);
-    
-    StickCP2.Display.setCursor(20, 60);
-    StickCP2.Display.print("Getting time...");
-    
-    // Try to get time with timeout
-    struct tm timeinfo = { 0 };
-    int attempts = 0;
-    bool success = false;
-    
-    while (attempts < 10 && !success) {
-        if (getLocalTime(&timeinfo, 2000)) {
-            // Verify year is reasonable (2024-2030)
-            if (timeinfo.tm_year + 1900 >= 2024 && timeinfo.tm_year + 1900 <= 2030) {
-                success = true;
-            }
-        }
-        attempts++;
-        delay(500);
-    }
-    
-    if (success) {
-        // Display synced time briefly
-        StickCP2.Display.fillScreen(C_BLACK);
-        StickCP2.Display.setCursor(20, 40);
-        StickCP2.Display.setTextColor(C_GREEN);
-        StickCP2.Display.printf("Time: %02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
-        StickCP2.Display.setCursor(20, 60);
-        StickCP2.Display.print("Synced!");
-        
-        // Set M5's RTC
-        m5::rtc_datetime_t dt;
-        dt.date.year = timeinfo.tm_year + 1900;
-        dt.date.month = timeinfo.tm_mon + 1;
-        dt.date.date = timeinfo.tm_mday;
-        dt.time.hours = timeinfo.tm_hour;
-        dt.time.minutes = timeinfo.tm_min;
-        dt.time.seconds = timeinfo.tm_sec;
-        StickCP2.Rtc.setDateTime(dt);
-        
-        delay(1000);
-    } else {
-        StickCP2.Display.fillScreen(C_BLACK);
-        StickCP2.Display.setCursor(20, 50);
-        StickCP2.Display.setTextColor(C_RED);
-        StickCP2.Display.print("NTP Failed!");
-        delay(2000);
-    }
+    StickNet::syncNTP();
 }
 
 // Draw WiFi icon at specified position
@@ -1060,7 +962,6 @@ void drawMenu() {
 }
 
 void init() {
-    StickCP2.begin();
     StickCP2.Speaker.begin();
     StickCP2.Speaker.setVolume(160);
     StickCP2.Mic.begin();
@@ -1079,8 +980,9 @@ void init() {
 }
 
 void tick() {
-    StickCP2.update();
-
+    // NOTE: StickCP2.update() is called by the sketch wrapper (stick.ino
+    // or arcade.ino) once per loop iteration. Calling it again here
+    // would clear wasPressed() and swallow the button events.
     if (StickCP2.BtnB.wasPressed()) {
         selectedGameIndex++;
         if (selectedGameIndex >= NUM_GAMES) selectedGameIndex = 0;
