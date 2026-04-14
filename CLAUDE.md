@@ -17,6 +17,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Shared Arduino C++ libraries live in `libraries/` at the repo root. `tools/flash.sh` passes this directory to `arduino-cli compile` via `--libraries`, so any sketch can `#include` from it without extra configuration. The directory starts empty and fills organically when a second sketch wants a helper — there is no speculative sharing.
 
+Some libraries under `libraries/` are **gitignored config files**: `wifi_config/wifi_config.h` holds WiFi credentials and `secrets_config/secrets_config.h` holds server endpoints and other runtime secrets. Each has a tracked `.example` template; on a fresh clone, `cp *.h.example *.h` and fill in your values. Sketches include them via `#include <wifi_config.h>` / `#include <secrets_config.h>` and the `--libraries` flag on `flash.sh` handles discovery.
+
 ## Build & Upload
 
 Uses `arduino-cli` with the M5Stack board package. `tools/flash.sh` is the usual entry point for any Arduino sketch in the repo.
