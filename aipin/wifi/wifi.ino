@@ -2,28 +2,8 @@
 #include <WiFi.h>
 #include <time.h>
 
-// ==========================================
-//          WIFI CONFIGURATION
-// ==========================================
-// List of allowed WiFi networks (SSID, Password)
-struct WiFiCredentials {
-    const char* ssid;
-    const char* password;
-};
-
-// Add your WiFi networks here
-WiFiCredentials wifiNetworks[] = {
-    {"REDACTED-WIFI", "REDACTED-WIFI-PW"},
-    {"REDACTED-WIFI", "REDACTED-WIFI"},
-    {"Mischief Managed", "Alohamora@404"},
-    {"Pravis_Aruba", "Pravis@88"}
-    // Add more networks as needed
-};
-const int numNetworks = sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
-
-// Server configuration
-const char* serverHost = "122.176.149.247";  // Change to your server IP
-const uint16_t serverPort = 8765;
+#include <wifi_config.h>
+#include <secrets_config.h>
 
 WiFiClient client;
 
@@ -203,11 +183,11 @@ bool connectToWiFi() {
         String foundSSID = WiFi.SSID(i);
         Serial.printf("[AiPin] Checking: %s\n", foundSSID.c_str());
         
-        for (int j = 0; j < numNetworks; j++) {
-            if (foundSSID == wifiNetworks[j].ssid) {
-                Serial.printf("[AiPin] Attempting to connect to: %s\n", wifiNetworks[j].ssid);
+        for (size_t j = 0; j < kWiFiNetworkCount; j++) {
+            if (foundSSID == kWiFiNetworks[j].ssid) {
+                Serial.printf("[AiPin] Attempting to connect to: %s\n", kWiFiNetworks[j].ssid);
                 
-                WiFi.begin(wifiNetworks[j].ssid, wifiNetworks[j].password);
+                WiFi.begin(kWiFiNetworks[j].ssid, kWiFiNetworks[j].password);
                 
                 int attempts = 0;
                 while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -217,7 +197,7 @@ bool connectToWiFi() {
                 }
                 
                 if (WiFi.status() == WL_CONNECTED) {
-                    Serial.printf("\n[AiPin] Connected to: %s\n", wifiNetworks[j].ssid);
+                    Serial.printf("\n[AiPin] Connected to: %s\n", kWiFiNetworks[j].ssid);
                     Serial.printf("[AiPin] IP: %s\n", WiFi.localIP().toString().c_str());
                     return true;
                 }
@@ -231,9 +211,9 @@ bool connectToWiFi() {
 }
 
 bool connectToServer() {
-    Serial.printf("[AiPin] Connecting to server %s:%d\n", serverHost, serverPort);
+    Serial.printf("[AiPin] Connecting to server %s:%d\n", kAiPinServerHost, kAiPinServerPort);
     
-    if (client.connect(serverHost, serverPort)) {
+    if (client.connect(kAiPinServerHost, kAiPinServerPort)) {
         Serial.println("[AiPin] Connected to server!");
         return true;
     }
@@ -333,8 +313,8 @@ void drawAvailableNetworks() {
             // Check if this is a known network
             bool isKnown = false;
             String foundSSID = WiFi.SSID(i);
-            for (int j = 0; j < numNetworks; j++) {
-                if (foundSSID == wifiNetworks[j].ssid) {
+            for (size_t j = 0; j < kWiFiNetworkCount; j++) {
+                if (foundSSID == kWiFiNetworks[j].ssid) {
                     isKnown = true;
                     break;
                 }
