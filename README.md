@@ -1,131 +1,39 @@
-# AiPin
+# electronics-lab
 
-Audio streamer for the **M5StickC Plus 2** with Bluetooth and WiFi transport options.
+A personal sandbox for small electronics projects, mostly on the **M5StickC Plus 2** (ESP32), plus breadboard / sensor experiments over time.
 
-## Features
+Each sub-project is self-contained and can be built independently. Shared tooling lives at the repo root.
 
-- **Two transport modes** — Bluetooth SPP or WiFi TCP streaming
-- **Record & stream** audio from the built-in microphone
-- **Real-time audio processing** — gain, high-pass filter, low-pass filter, noise gate, soft clipping
-- **Icon-based UI** — visual interface with battery, signal strength, and recording indicators
-- **Gemini AI transcription** — automatic speech-to-text with speaker diarization (WiFi mode)
-- **Auto-reconnect** — recovers from WiFi/server/BT disconnections
+## Projects
+
+| Dir | What it is | Status |
+|---|---|---|
+| [`aipin_bl/`](aipin_bl) | AiPin — Bluetooth SPP audio streamer | Working |
+| [`aipin_wifi/`](aipin_wifi) | AiPin — WiFi TCP audio streamer | Working |
+| [`server/`](server) | Python TCP server + Gemini transcription for AiPin WiFi | Working |
+| [`clap_remote/`](clap_remote) | Clap-activated IR remote for a TCL Mini LED TV | 🚧 Phase 1 in progress |
+
+## Shared tooling
+
+- [`tools/flash.sh`](tools/flash.sh) — one-liner to `arduino-cli compile && upload` any sketch directory. Hard-codes the M5StickC Plus 2 FQBN and a USB port; edit those two lines if you use a different board or port.
 
 ## Hardware
 
-- [M5StickC Plus 2](https://docs.m5stack.com/en/core/M5StickC%20PLUS2) (ESP32-based)
-- Built-in SPM1423 PDM microphone
-- 135x240 LCD display
-- Two buttons: BtnA (front), BtnB (side)
+Most projects target the [M5StickC Plus 2](https://docs.m5stack.com/en/core/M5StickC%20PLUS2): ESP32-PICO-V3-02, built-in PDM mic, IR LED, 135×240 LCD, two buttons. Future projects may branch out to a bare ESP32 + breadboard + sensors.
 
-## Project Structure
+## Convention
 
-```
-aipin_bl/          # Bluetooth variant
-  aipin.ino        #   Firmware (BT SPP slave mode)
-  receiver.py      #   Mac-side receiver + transcription
-aipin_wifi/        # WiFi variant
-  aipin_wifi.ino   #   Firmware (WiFi + TCP client)
-server/            # WiFi server
-  server.py        #   TCP server + Gemini transcription
-  README.md        #   Server-specific docs
-```
+- Firmware directories contain one Arduino sketch each (`<name>/<name>.ino`), with optional `.h`/`.cpp` siblings that arduino-cli picks up automatically.
+- Per-project docs live inside the project folder.
+- Root-level `CLAUDE.md` gives working notes to Claude / future-me for the whole repo.
 
-## Quick Start — Bluetooth Mode
-
-### 1. Flash the firmware
+## Quick reference — build any sketch
 
 ```bash
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX aipin_bl/
+./tools/flash.sh <project>/firmware/<sketch>
+# or, for the flat AiPin sketches:
+./tools/flash.sh aipin_bl
+./tools/flash.sh aipin_wifi
 ```
 
-### 2. Pair with your Mac
-
-1. Open **System Settings > Bluetooth** on your Mac
-2. The device appears as **"AiPin"** — click Connect (PIN: `1234`)
-3. A serial port `/dev/cu.AiPin` becomes available
-
-### 3. Receive audio
-
-```bash
-pip install pyserial
-python aipin_bl/receiver.py --port /dev/cu.AiPin
-```
-
-## Quick Start — WiFi Mode
-
-### 1. Configure WiFi and server
-
-Edit `aipin_wifi/aipin_wifi.ino` — update WiFi credentials and server IP address.
-
-### 2. Flash the firmware
-
-```bash
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX aipin_wifi/
-```
-
-### 3. Start the server
-
-```bash
-pip install requests
-python server/server.py --port 8765
-```
-
-The server prints its local IP — use that in the firmware config. Recordings are saved to `recordings/` and transcripts to `transcripts/`.
-
-### 4. Transcription
-
-Set `GEMINI_API_KEY` in a `.env` file at the project root. The server automatically transcribes recordings with speaker diarization.
-
-## Device Buttons
-
-| Screen | BtnA | BtnB |
-|--------|------|------|
-| Waiting | --- | --- |
-| Connected | Record | Disconnect |
-| Recording | Stop | Disconnect |
-
-## Audio Streaming Protocol
-
-Audio is streamed using a simple binary protocol (same for both BT and WiFi):
-
-| Packet | Size | Content |
-|--------|------|---------|
-| Start | 12 bytes | `APST` magic + sample rate (uint32) + bit depth (uint16) + channels (uint16) |
-| Audio | 1024 bytes each | Raw PCM chunks |
-| Stop | 4 bytes | `APND` magic |
-
-Default format: **8kHz, 8-bit, mono** (~8 KB/s).
-
-## Audio Processing Pipeline
-
-The firmware processes audio in real-time before streaming:
-
-1. **Gain** — software amplification
-2. **High-pass filter** — removes DC offset and low-frequency rumble
-3. **Low-pass filter** — removes high-frequency noise
-4. **Noise gate** — suppresses quiet background noise
-5. **Soft clipping** — compresses peaks for natural limiting
-6. **Hard clipping** — prevents overflow
-
-All parameters are tunable at runtime via Serial commands: `gain`, `gate`, `hpf`, `lpf`, `knee`, `ratio`.
-
-## Requirements
-
-**Firmware:**
-- `arduino-cli` with M5Stack ESP32 board package
-- Libraries: M5StickCPlus2
-
-**Bluetooth receiver:**
-- Python 3, `pyserial`
-
-**WiFi server:**
-- Python 3, `requests`
-- `GEMINI_API_KEY` (optional, for transcription)
-
-## Notes
-
-- Speaker and microphone share GPIO 0 — speaker is automatically disabled during recording
-- Serial debug logging available at 115200 baud over USB
-- WiFi variant auto-reconnects to WiFi and server on connection loss
-- BT variant runs in slave mode — the Mac initiates the connection
+See each sub-project's README for project-specific setup (WiFi credentials, pairing, etc.).

@@ -2,13 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Repo overview
 
-AiPin is an **audio streamer** for the **M5StickC Plus 2** (ESP32-based microcontroller). It captures audio from the built-in microphone and streams it to a Mac for recording and transcription. Two transport variants are available:
+`electronics-lab` is a sandbox for small electronics / M5StickC Plus 2 / ESP32 projects. Each top-level directory is an independent sub-project. Sub-projects may share some tooling (see `tools/flash.sh`) but otherwise don't depend on each other.
 
-- **`aipin_bl/`** — Bluetooth SPP mode. Runs as a BT slave ("AiPin"), Mac connects via serial port.
-- **`aipin_wifi/`** — WiFi + TCP mode. Connects to a known WiFi network and streams to a TCP server.
+Current sub-projects:
+
+- **`aipin_bl/`** — AiPin Bluetooth SPP audio streamer. Runs as a BT slave ("AiPin"), Mac connects via serial port.
+- **`aipin_wifi/`** — AiPin WiFi + TCP audio streamer. Connects to a known WiFi network and streams to a TCP server.
 - **`server/`** — Python TCP server that receives WiFi audio streams, saves WAV files, and transcribes with Gemini AI.
+- **`clap_remote/`** — Clap-activated IR remote for a TCL Mini LED TV. Phase 1 in progress; see `clap_remote/CLAUDE.md` and `clap_remote/docs/superpowers/` for the full spec, plan, and working notes.
 
 ## Build & Upload Commands
 
