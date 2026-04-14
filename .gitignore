@@ -31,3 +31,7 @@ transcripts/
 
 # Superpowers workspace (specs, plans, audits — all session-scoped, not shared)
 **/superpowers/
+
+# Machine-specific configs (WiFi creds, server endpoints) — templates are tracked as .example
+libraries/wifi_config/wifi_config.h
+libraries/secrets_config/secrets_config.h
