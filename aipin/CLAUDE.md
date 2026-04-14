@@ -43,7 +43,7 @@ All screens follow `drawHeader()` / content / `drawFooter()` structure. Header s
 
 ```bash
 pip install pyserial
-python aipin/bl/receiver.py --port /dev/cu.AiPin --continuous
+python aipin/bl/receiver.py --port /dev/cu.AiPin
 
 pip install requests
 python aipin/server/server.py --port 8765
