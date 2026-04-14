@@ -28,3 +28,8 @@ transcripts/
 
 # Claude files
 .claude/
+
+# Superpowers workspace files (session-scoped, not shared)
+**/superpowers/plans/
+**/superpowers/audit/
+**/superpowers/audits/
