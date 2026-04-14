@@ -10,7 +10,7 @@
 
 #include <M5Unified.h>
 #include <IRremote.hpp>
-#include "../common/ir_codes.h"
+#include "ir_codes.h"
 
 static size_t gIndex = 0;
 
