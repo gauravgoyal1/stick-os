@@ -1,4 +1,4 @@
-# CLAUDE.md — voice-remote project notes
+# CLAUDE.md — clap_remote sub-project notes
 
 Living notes for the assistant. Update as the project evolves.
 
@@ -25,17 +25,20 @@ Clap-activated IR remote on M5StickC Plus 2. Phase 2 will add Wi-Fi + voice.
 
 ## FQBN
 
-Use `m5stack:esp32:m5stick_c` (or `m5stack:esp32:stamp_pico` — TBD; verify with `arduino-cli board listall | grep -i stick`).
+Use `m5stack:esp32:m5stack_stickc_plus2`.
 
 ## Conventions
 
-- Sketches live under `firmware/<feature>/<feature>.ino`
-- Specs live under `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-- All build/upload via `arduino-cli compile` and `arduino-cli upload --port /dev/cu.usbserial-5B1E0428761`
+- The main clap_remote sketch lives flat at `clap_remote/clap_remote.ino` (plus helper `.h`/`.cpp` files alongside it). No nested `firmware/` layer.
+- `clap_remote/ir_codes.h` holds the TCL NEC power-toggle codes. arduino-cli picks it up automatically because it sits in the sketch directory.
+- Project-agnostic diagnostic sketches (`hello_world`, `ir_probe`, `ir_sweep`) live at the repo top level under `diagnostics/`, not inside clap_remote — they've been promoted so any future project can reuse them.
+- Specs live under `clap_remote/docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
+- Plans live under `clap_remote/docs/superpowers/plans/` but are gitignored — they're session-scoped workflow artifacts, not tracked deliverables.
+- Build/upload via `./tools/flash.sh clap_remote` from the repo root (or any sketch dir path).
 
 ## Phase 1 decisions (locked in brainstorm, 2026-04-14)
 
-- Target: TCL Mini LED TV, NEC protocol, code discovered by `ir_probe` cycling through known candidates.
+- Target: TCL Mini LED TV, NEC protocol, code discovered by `diagnostics/ir_probe` cycling through known candidates.
 - Gesture: 2 claps → power toggle. 3-clap gesture dropped.
 - Feedback: LCD + LED flash. No buzzer.
 - Power: USB, permanent, near the TV.
@@ -44,9 +47,9 @@ Use `m5stack:esp32:m5stick_c` (or `m5stack:esp32:stamp_pico` — TBD; verify wit
 - Safety: Button A ARM/DISARM, 10 s post-fire cooldown, cooldown independent of disarm.
 - Architecture: layered sketch (`mic` / `detector` / `gesture` / `ir` / `ui`) so Phase 2 can replace only `detector`.
 
-See full spec at `docs/superpowers/specs/2026-04-14-clap-ir-remote-design.md`.
+See full spec at `clap_remote/docs/superpowers/specs/2026-04-14-clap-ir-remote-design.md`.
 
 ## Open questions (to resolve during build)
 
-- Confirm actual IR LED GPIO from M5Unified headers on first compile.
+- Confirm actual IR LED GPIO from M5Unified headers on first compile. (Mid-Task-2 investigation: the pin-sweep result is still outstanding; see the plan file for context.)
 - Confirm which TCL NEC power code works for the user's specific Mini LED model.

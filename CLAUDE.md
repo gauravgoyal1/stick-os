@@ -4,86 +4,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repo overview
 
-`electronics-lab` is a sandbox for small electronics / M5StickC Plus 2 / ESP32 projects. Each top-level directory is an independent sub-project. Sub-projects may share some tooling (see `tools/flash.sh`) but otherwise don't depend on each other.
+`electronics-lab` is a sandbox for small electronics / M5StickC Plus 2 / ESP32 projects. Each top-level directory is either a single-sketch mini app or an **umbrella** grouping related components (one sketch plus helpers, or several related sketches). Sub-projects share some tooling (`tools/flash.sh`, `libraries/`) but otherwise don't depend on each other.
 
-Current sub-projects:
+## Current sub-projects
 
-- **`aipin_bl/`** — AiPin Bluetooth SPP audio streamer. Runs as a BT slave ("AiPin"), Mac connects via serial port.
-- **`aipin_wifi/`** — AiPin WiFi + TCP audio streamer. Connects to a known WiFi network and streams to a TCP server.
-- **`server/`** — Python TCP server that receives WiFi audio streams, saves WAV files, and transcribes with Gemini AI.
-- **`clap_remote/`** — Clap-activated IR remote for a TCL Mini LED TV. Phase 1 in progress; see `clap_remote/CLAUDE.md` and `clap_remote/docs/superpowers/` for the full spec, plan, and working notes.
+- **`aipin/`** — AiPin audio streamer sub-project. Two firmware variants (`bl/` Bluetooth SPP, `wifi/` WiFi+TCP) plus a Python host-side server under `server/`. See `aipin/CLAUDE.md` for architecture and build notes.
+- **`arcade/`** — Multi-game arcade sketch for the M5StickC Plus 2 (flappy, dino, scream, galaxy, balance, simon). Pulled in from the user's Arduino sketchbook.
+- **`clap_remote/`** — Clap-activated IR remote for a TCL Mini LED TV. Phase 1 in progress. See `clap_remote/CLAUDE.md` and `clap_remote/docs/superpowers/` for spec, plan, and working notes.
+- **`diagnostics/`** — Project-agnostic hardware test sketches: `hello_world/`, `ir_probe/`, `ir_sweep/`. Good for first-time peripheral sanity checks or hardware probes that aren't tied to any one project.
 
-## Build & Upload Commands
+## Shared libraries convention
 
-Uses `arduino-cli` with the M5Stack board package.
+Shared Arduino C++ libraries live in `libraries/` at the repo root. `tools/flash.sh` passes this directory to `arduino-cli compile` via `--libraries`, so any sketch can `#include` from it without extra configuration. The directory starts empty and fills organically when a second sketch wants a helper — there is no speculative sharing.
+
+## Build & Upload
+
+Uses `arduino-cli` with the M5Stack board package. `tools/flash.sh` is the usual entry point for any Arduino sketch in the repo.
 
 ```bash
-# Compile (specify sketch directory)
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 aipin_bl/
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 aipin_wifi/
-
-# Find connected device port
-arduino-cli board list
-
-# Upload (replace port as needed)
-arduino-cli upload --fqbn m5stack:esp32:m5stack_stickc_plus2 -p /dev/cu.usbserial-XXXXX aipin_wifi/
-
 # Compile + upload in one shot
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 -u -p /dev/cu.usbserial-XXXXX aipin_wifi/
+./tools/flash.sh aipin/bl
+./tools/flash.sh aipin/wifi
+./tools/flash.sh clap_remote
+./tools/flash.sh diagnostics/ir_probe
+./tools/flash.sh arcade
+
+# Compile only, no upload
+arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 \
+  --libraries "$(git rev-parse --show-toplevel)/libraries" \
+  <sketch-dir>
+
+# Find the device port
+arduino-cli board list
 ```
 
 **Board package sources** (configured in arduino-cli):
 - ESP32: `https://dl.espressif.com/dl/package_esp32_index.json`
 - M5Stack: `https://static-cdn.m5stack.com/resource/arduino/package_m5stack_index.json`
 
-**Required libraries**: M5StickCPlus2, BluetoothSerial (ESP32 core, BT variant only), WiFi (ESP32 core, WiFi variant only)
+**Required libraries**: M5Unified, M5StickCPlus2, BluetoothSerial (ESP32 core, BT variant only), WiFi (ESP32 core, WiFi variant only), IRremote (clap_remote, ir_probe, ir_sweep), arduinoFFT (clap_remote detector).
 
-## Architecture
+## Host-side tooling
 
-### Bluetooth variant (`aipin_bl/aipin.ino`)
-
-Single-file state machine. Runs in BT slave mode, advertising as "AiPin". Mac connects by opening `/dev/cu.AiPin` (e.g. via `receiver.py`). Connected screen shows device info; BtnA starts recording, BtnB disconnects.
-
-### WiFi variant (`aipin_wifi/aipin_wifi.ino`)
-
-Single-file state machine. On boot, scans for known WiFi networks (hardcoded credentials), connects, then establishes a TCP connection to the server. Auto-reconnects on WiFi or server loss.
-
-### Server (`server/server.py`)
-
-TCP server that accepts connections from WiFi-mode AiPin devices. Handles multiple clients via threads. Receives audio using the same APST/APND protocol, saves WAV files, and optionally transcribes with Gemini API (speaker diarization).
-
-### Shared architecture
-
-**Audio streaming protocol**: 12-byte `APST` header (magic + sample rate uint32 + bit depth uint16 + channels uint16), then raw PCM chunks (1024 bytes each), then 4-byte `APND` stop marker.
-
-**Audio format**: 8kHz 8-bit mono. Mic captures 16-bit natively; firmware applies a processing pipeline (gain, HPF, LPF, noise gate, soft/hard clipping) then downsamples to 8-bit.
-
-**UI pattern**: All screens follow `drawHeader()` / content / `drawFooter()` structure. Header shows title + battery %. Footer shows BtnA/BtnB action hints.
-
-**Display**: 135x240 pixels, portrait (rotation 0). **Inputs**: BtnA (front button), BtnB (side button).
-
-## Key Constraints
-
-- Colors are initialized via `initColors()` after display init — use the `C_*` globals, not raw color constants
-- **Speaker and microphone share GPIO 0** — `Speaker.end()` must be called before `Mic.begin()` and vice versa
-- Audio processing parameters are tunable at runtime via Serial commands: `gain`, `gate`, `hpf`, `lpf`, `knee`, `ratio`, `audio`
-- WiFi variant: credentials and server IP are hardcoded in `aipin_wifi.ino` — update before deploying
-- Server requires `GEMINI_API_KEY` in `.env` (project root) for transcription
-
-## Bluetooth Receiver
-
-`aipin_bl/receiver.py` runs on the Mac to receive BT audio and save as `.wav` files.
-
-```bash
-pip install pyserial
-python aipin_bl/receiver.py --port /dev/cu.AiPin --continuous
-```
-
-## WiFi Server
-
-`server/server.py` runs on the Mac/server to receive WiFi audio.
-
-```bash
-pip install requests
-python server/server.py --port 8765
-```
+See `aipin/CLAUDE.md` for the Python receivers (`aipin/bl/receiver.py`, `aipin/server/server.py`) and the `GEMINI_API_KEY` requirement for transcription.
