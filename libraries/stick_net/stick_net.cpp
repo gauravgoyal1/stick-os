@@ -149,4 +149,39 @@ bool syncNTP() {
     return ok;
 }
 
+bool isConnected() { return isWiFiReady(); }
+
+const char* ssid() {
+    static char buf[33] = {0};
+    if (!isWiFiReady()) { buf[0] = '\0'; return buf; }
+    String s = WiFi.SSID();
+    strncpy(buf, s.c_str(), sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    return buf;
+}
+
+size_t scanNetworks(ScanResult* out, size_t maxResults) {
+    ensureMutex();
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+
+    int n = WiFi.scanNetworks();
+    size_t written = 0;
+    for (int i = 0; i < n && written < maxResults; i++) {
+        ScanResult& r = out[written++];
+        String foundSsid = WiFi.SSID(i);
+        strncpy(r.ssid, foundSsid.c_str(), sizeof(r.ssid) - 1);
+        r.ssid[sizeof(r.ssid) - 1] = '\0';
+        r.rssi    = static_cast<int8_t>(WiFi.RSSI(i));
+        r.channel = static_cast<uint8_t>(WiFi.channel(i));
+        r.known   = false;
+        for (size_t j = 0; j < kWiFiNetworkCount; j++) {
+            if (foundSsid == kWiFiNetworks[j].ssid) { r.known = true; break; }
+        }
+    }
+    WiFi.scanDelete();
+
+    xSemaphoreGive(g_mutex);
+    return written;
+}
+
 }  // namespace StickNet

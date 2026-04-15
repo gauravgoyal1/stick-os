@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 // Shared WiFi + NTP helpers used by both arcade_app and aipin_wifi_app.
@@ -35,6 +36,30 @@ bool isWiFiReady();
 
 // Current RSSI, or 0 if not connected. Used for status icons.
 int rssi();
+
+// Compatibility alias for callers that prefer the shorter name.
+// Equivalent to isWiFiReady().
+bool isConnected();
+
+// Current SSID if connected, empty string otherwise.
+// Returned pointer is valid until the next WiFi state change; callers should
+// copy into their own buffer if they need to hold it across ticks.
+const char* ssid();
+
+// Small POD describing one scan result — keeps the app side independent of
+// WiFi.h's result types.
+struct ScanResult {
+  char    ssid[33];   // max SSID length + null terminator
+  int8_t  rssi;
+  uint8_t channel;
+  bool    known;      // true iff this SSID matches a wifi_config entry
+};
+
+// Blocking scan. Writes up to `maxResults` entries to `out`. Returns the
+// number actually written (may be less than the number of networks visible
+// if `maxResults` is small). Safe to call from app tick() paths — coordinates
+// with the background bring-up task via the same mutex as connectWiFi().
+size_t scanNetworks(ScanResult* out, size_t maxResults);
 
 // Synchronous connect — scans, associates. Waits for any in-flight
 // background task to finish first so it is safe to call from tick()
