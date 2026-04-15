@@ -16,6 +16,7 @@
 #include <arcade_app.h>
 #include <aipin_wifi_app.h>
 #include <stick_net.h>
+#include <stick_os.h>
 
 namespace {
 
