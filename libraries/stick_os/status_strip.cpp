@@ -56,6 +56,10 @@ void statusStripDrawFull() {
 void statusStripTick(const char* appName) {
     auto& d = StickCP2.Display;
 
+    // Force full repaint every tick while an app is running,
+    // since games may overdraw the status strip area.
+    if (appName != nullptr) g_dirty = true;
+
     if (g_dirty) {
         g_lastRssiBars   = -1;
         g_lastConnected  = !StickNet::isConnected();
