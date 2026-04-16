@@ -6,9 +6,9 @@ using namespace websockets;
 #include <stick_net.h>
 #include <stick_store.h>
 #include <status_strip.h>
-#include "aipin_wifi_app.h"
+#include "scribe.h"
 
-namespace AiPinWifiApp {
+namespace Scribe {
 
 WebsocketsClient wsClient;
 
@@ -136,7 +136,7 @@ void drawSlash(int cx, int cy, int size, uint16_t color) {
 // ==========================================
 bool connectToServer() {
     const char* proto = (kStickServerPort == 443) ? "wss://" : "ws://";
-    String url = String(proto) + kStickServerHost + ":" + String(kStickServerPort) + "/services/aipin";
+    String url = String(proto) + kStickServerHost + ":" + String(kStickServerPort) + "/services/scribe";
     char apiKey[65];
     if (stick_os::getApiKey(apiKey, sizeof(apiKey))) {
         url += "?key=" + String(apiKey);
@@ -681,19 +681,19 @@ void icon(int x, int y, uint16_t color) {
     d.fillRect(x + 10, y + 28, 17, 2, color);
 }
 
-}  // namespace AiPinWifiApp
+}  // namespace Scribe
 
 #include <stick_os.h>
 
-static const stick_os::AppDescriptor kAipinDescriptor = {
+static const stick_os::AppDescriptor kDesc = {
     /*id=*/       "scribe",
     /*name=*/     "Scribe",
     /*version=*/  "1.0.0",
     /*category=*/ stick_os::CAT_UTILITY,
     /*flags=*/    stick_os::APP_NEEDS_NET | stick_os::APP_NEEDS_MIC,
-    /*icon=*/     &AiPinWifiApp::icon,
+    /*icon=*/     &Scribe::icon,
     /*runtime=*/  stick_os::RUNTIME_NATIVE,
-    /*native=*/   { &AiPinWifiApp::init, &AiPinWifiApp::tick, nullptr, nullptr },
+    /*native=*/   { &Scribe::init, &Scribe::tick, nullptr, nullptr },
     /*script=*/   { nullptr, nullptr },
 };
-STICK_REGISTER_APP(kAipinDescriptor);
+STICK_REGISTER_APP(kDesc);

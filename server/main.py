@@ -21,9 +21,9 @@ app.include_router(firmware_router, prefix="/api")
 app.include_router(wifi_router, prefix="/api")
 
 # Service routes (WebSocket)
-from services.aipin import router as aipin_router
+from services.scribe import router as scribe_router
 
-app.include_router(aipin_router, prefix="/services")
+app.include_router(scribe_router, prefix="/services")
 
 # Static file serving for downloads
 if (STORAGE / "apps").exists():

@@ -48,8 +48,8 @@ struct ScriptEntry {
 };
 
 struct AppDescriptor {
-    const char* id;          // stable slug: "arcade", "aipin", "flappy"
-    const char* name;        // display name: "Arcade", "AiPin"
+    const char* id;          // stable slug: "arcade", "scribe", "flappy"
+    const char* name;        // display name: "Arcade", "Scribe"
     const char* version;     // "1.0.0"
     AppCategory category;
     AppFlags    flags;

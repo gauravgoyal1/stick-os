@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **`os/`** — Stick OS firmware (Arduino sketch). The main sketch is `os/os.ino`. Boots to a portrait-mode category picker (Games / Apps / Sensors / Settings) driven by the app registry in `libraries/stick_os/`.
 - **`libraries/`** — Shared Arduino C++ libraries. Each app is a self-contained library that registers via `STICK_REGISTER_APP(...)`. Adding a new native app = create a library + add an `#include` in `os/os.ino`.
-- **`server/`** — FastAPI backend. Serves the app catalog, firmware updates, WiFi credentials, and AiPin WebSocket audio streaming. Runs as a single uvicorn process.
+- **`server/`** — FastAPI backend. Serves the app catalog, firmware updates, WiFi credentials, and Scribe WebSocket audio streaming. Runs as a single uvicorn process.
 - **`apps/`** — MicroPython app sources (Phase 2, not yet active).
 - **`tools/`** — Build, flash, and publish tooling.
 - **`docs/`** — Design specs and implementation plans.
@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current apps (19 native)
 
 **Games (7):** `game_flappy`, `game_dino`, `game_scream`, `game_galaxy`, `game_balance`, `game_simon`, `game_panic` — each in `libraries/game_*/`
-**Apps (3):** `aipin_wifi_app` (Scribe — audio streaming via WebSocket), `app_stopwatch`, `app_flashlight`
+**Apps (3):** `scribe` (audio streaming via WebSocket), `app_stopwatch`, `app_flashlight`
 **Sensors (4):** `sensor_battery`, `sensor_imu`, `sensor_wifi_scan`, `sensor_mic`
 **Settings (5):** `settings_about`, `settings_wifi`, `settings_storage`, `settings_apps`, `settings_time`
 
@@ -63,7 +63,7 @@ On boot, the OS tries the last connected network, then shows a WiFi picker if it
 
 ## API key setup
 
-Services (like AiPin WebSocket) require a shared API key. The key is stored in NVS on the device and validated by the server via `STICK_API_KEY` env var.
+Services (like Scribe WebSocket) require a shared API key. The key is stored in NVS on the device and validated by the server via `STICK_API_KEY` env var.
 
 ```bash
 # Set API key on device
@@ -97,7 +97,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765
 - `GET /api/wifi` — WiFi credentials for device sync
 - `GET /apps/{id}/{file}` — app package downloads
 - `GET /firmware/{file}` — firmware binary downloads
-- `WS /services/aipin` — AiPin audio streaming + Gemini transcription
+- `WS /services/scribe` — Scribe audio streaming + Gemini transcription
 
 ## Storage optimization
 

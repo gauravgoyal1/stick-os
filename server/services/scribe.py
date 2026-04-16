@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
-log = logging.getLogger("aipin")
+log = logging.getLogger("scribe")
 
 router = APIRouter()
 
@@ -43,16 +43,16 @@ Notes:
 Begin transcription:"""
 
 
-@router.websocket("/aipin")
-async def aipin_stream(websocket: WebSocket):
+@router.websocket("/scribe")
+async def scribe_stream(websocket: WebSocket):
     expected_key = os.getenv("STICK_API_KEY", "")
     client_key = websocket.query_params.get("key", "")
     if not expected_key or client_key != expected_key:
-        log.warning("AiPin auth failed (key=%s)", "missing" if not client_key else "mismatch")
+        log.warning("Scribe auth failed (key=%s)", "missing" if not client_key else "mismatch")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     await websocket.accept()
-    log.info("AiPin client connected")
+    log.info("Scribe client connected")
 
     recordings_dir = STORAGE / "recordings"
     transcripts_dir = STORAGE / "transcripts"
@@ -74,7 +74,7 @@ async def aipin_stream(websocket: WebSocket):
 
         # 2. Prepare WAV file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        wav_path = recordings_dir / f"aipin_{timestamp}.wav"
+        wav_path = recordings_dir / f"scribe_{timestamp}.wav"
         wf = wave.open(str(wav_path), "wb")
         wf.setnchannels(channels)
         wf.setsampwidth(bit_depth // 8)
@@ -97,15 +97,15 @@ async def aipin_stream(websocket: WebSocket):
         if gemini_key:
             transcript = await _transcribe(wav_path, gemini_key)
             if transcript:
-                txt_path = transcripts_dir / f"aipin_{timestamp}.txt"
+                txt_path = transcripts_dir / f"scribe_{timestamp}.txt"
                 txt_path.write_text(transcript)
                 log.info(f"Transcript saved: {txt_path}")
                 await websocket.send_text(transcript)
 
     except WebSocketDisconnect:
-        log.info("AiPin client disconnected")
+        log.info("Scribe client disconnected")
     except Exception as e:
-        log.error(f"AiPin error: {e}")
+        log.error(f"Scribe error: {e}")
 
 
 async def _transcribe(wav_path: Path, api_key: str) -> str:

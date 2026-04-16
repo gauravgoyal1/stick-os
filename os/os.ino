@@ -28,7 +28,7 @@
 #include <game_balance.h>
 #include <game_simon.h>
 #include <game_panic.h>
-#include <aipin_wifi_app.h>
+#include <scribe.h>
 #include <settings_about.h>
 #include <sensor_battery.h>
 #include <sensor_wifi_scan.h>

@@ -8,10 +8,6 @@
 static const char* kStickServerHost = "your-server.example.com";
 static const int   kStickServerPort = 443;  // HTTPS
 
-// AiPin server endpoint (used by aipin_wifi_app until Task 10 consolidates)
-static const char* kAiPinServerHost = "your-server.example.com";
-static const int   kAiPinServerPort = 8765;
-
 // Temporary WiFi stubs — will be replaced by NVS-based WiFi management
 struct WiFiNetwork { const char* ssid; const char* password; };
 static const WiFiNetwork kWiFiNetworks[] = { { "your-ssid", "your-password" } };
