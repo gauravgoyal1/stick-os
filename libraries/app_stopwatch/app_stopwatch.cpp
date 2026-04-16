@@ -136,7 +136,7 @@ void icon(int x, int y, uint16_t color) {
 }  // namespace AppStopwatch
 
 static const stick_os::AppDescriptor kDesc = {
-    "stopwatch", "Stopwatch", "1.0.0",
+    "stopwatch", "Timer", "1.0.0",
     stick_os::CAT_UTILITY, stick_os::APP_NONE,
     &AppStopwatch::icon, stick_os::RUNTIME_NATIVE,
     { &AppStopwatch::init, &AppStopwatch::tick, nullptr, nullptr },

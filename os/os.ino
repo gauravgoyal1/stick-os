@@ -188,11 +188,14 @@ void drawAppList() {
         // Icon
         if (app->icon) app->icon(10, y + 3, fg);
 
-        // Name — shifted left, fits 7 chars at textSize 2
+        // Name — 7 chars max at textSize 2 (89px available from x=46)
         d.setTextSize(2);
         d.setTextColor(sel ? WHITE : fg, bg);
         d.setCursor(46, y + 10);
-        d.print(app->name);
+        char truncName[8];
+        strncpy(truncName, app->name, 7);
+        truncName[7] = '\0';
+        d.print(truncName);
     }
 
     // Scroll indicator

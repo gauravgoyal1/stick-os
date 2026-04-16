@@ -92,7 +92,7 @@ void icon(int x, int y, uint16_t color) {
 }  // namespace SettingsApps
 
 static const stick_os::AppDescriptor kDesc = {
-    "apps", "Installed", "1.0.0",
+    "apps", "Apps", "1.0.0",
     stick_os::CAT_SETTINGS, stick_os::APP_SYSTEM_LOCKED,
     &SettingsApps::icon, stick_os::RUNTIME_NATIVE,
     { &SettingsApps::init, &SettingsApps::tick, nullptr, nullptr },

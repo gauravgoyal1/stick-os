@@ -161,7 +161,7 @@ void icon(int x, int y, uint16_t color) {
 }  // namespace SensorMic
 
 static const stick_os::AppDescriptor kDesc = {
-    "mic", "Mic Meter", "1.0.0",
+    "mic", "Mic", "1.0.0",
     stick_os::CAT_SENSOR, stick_os::APP_NEEDS_MIC,
     &SensorMic::icon, stick_os::RUNTIME_NATIVE,
     { &SensorMic::init, &SensorMic::tick, nullptr, nullptr },

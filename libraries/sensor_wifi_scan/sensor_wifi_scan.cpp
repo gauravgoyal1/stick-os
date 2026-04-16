@@ -115,7 +115,7 @@ void icon(int x, int y, uint16_t color) {
 }  // namespace SensorWiFiScan
 
 static const stick_os::AppDescriptor kDesc = {
-    "wifi_scan", "WiFi Scan", "1.0.0",
+    "wifi_scan", "Scan", "1.0.0",
     stick_os::CAT_SENSOR, stick_os::APP_NEEDS_NET,
     &SensorWiFiScan::icon, stick_os::RUNTIME_NATIVE,
     { &SensorWiFiScan::init, &SensorWiFiScan::tick, nullptr, nullptr },
