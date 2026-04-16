@@ -1,0 +1,10 @@
+{
+  "id": "tilt",
+  "name": "Tilt",
+  "version": "1.0.0",
+  "category": "utility",
+  "entry": "main.py",
+  "api_version": 1,
+  "heap_budget": 8192,
+  "description": "Bubble level — IMU-driven spirit level. A to zero the reference."
+}

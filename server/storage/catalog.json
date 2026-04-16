@@ -1,4 +1,29 @@
 {
   "version": 1,
-  "apps": []
+  "apps": [
+    {
+      "id": "snake",
+      "name": "Snake",
+      "version": "1.0.0",
+      "category": "game",
+      "api_version": 1,
+      "heap_budget": 16384,
+      "size": 0,
+      "sha256": "",
+      "archive_url": "",
+      "description": "Classic snake. A=turn right, B=turn left."
+    },
+    {
+      "id": "tilt",
+      "name": "Tilt",
+      "version": "1.0.0",
+      "category": "utility",
+      "api_version": 1,
+      "heap_budget": 8192,
+      "size": 0,
+      "sha256": "",
+      "archive_url": "",
+      "description": "Bubble level — IMU-driven spirit level. A zeros reference."
+    }
+  ]
 }

@@ -1,0 +1,10 @@
+{
+  "id": "snake",
+  "name": "Snake",
+  "version": "1.0.0",
+  "category": "game",
+  "entry": "main.py",
+  "api_version": 1,
+  "heap_budget": 16384,
+  "description": "Classic snake. A=turn right, B=turn left."
+}
