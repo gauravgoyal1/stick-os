@@ -1,5 +1,5 @@
 #include <M5StickCPlus2.h>
-#include <WiFi.h>
+#include <WiFiClient.h>
 
 #include <wifi_config.h>
 #include <secrets_config.h>
@@ -208,63 +208,49 @@ void drawSlash(int cx, int cy, int size, uint16_t color) {
 }
 
 void drawAvailableNetworks() {
-    int n = WiFi.scanNetworks();
-    
+    constexpr size_t kMaxScan = 8;
+    StickNet::ScanResult results[kMaxScan];
+    size_t n = StickNet::scanNetworks(results, kMaxScan);
+
     int startY = 100;
-    int maxNetworks = 5;  // Limit to 5 networks to fit on screen
-    
+    int maxNetworks = 5;
+
     StickCP2.Display.setTextSize(1);
     StickCP2.Display.setTextColor(C_GRAY);
     StickCP2.Display.setCursor(6, startY - 15);
     StickCP2.Display.print("Available Networks:");
-    
+
     if (n == 0) {
         StickCP2.Display.setTextColor(C_DARKGRAY);
         StickCP2.Display.setCursor(6, startY);
         StickCP2.Display.print("No networks found");
     } else {
-        int displayCount = min(n, maxNetworks);
+        int displayCount = (n < (size_t)maxNetworks) ? n : maxNetworks;
         for (int i = 0; i < displayCount; i++) {
             int y = startY + (i * 18);
-            int rssi = WiFi.RSSI(i);
-            
-            // Check if this is a known network
-            bool isKnown = false;
-            String foundSSID = WiFi.SSID(i);
-            for (size_t j = 0; j < kWiFiNetworkCount; j++) {
-                if (foundSSID == kWiFiNetworks[j].ssid) {
-                    isKnown = true;
-                    break;
-                }
-            }
-            
-            // Draw signal strength bars
-            drawWiFiBars(6, y, rssi);
-            
-            // Draw SSID name
-            String ssid = foundSSID;
+            const StickNet::ScanResult& r = results[i];
+
+            drawWiFiBars(6, y, r.rssi);
+
+            String ssid = r.ssid;
             if (ssid.length() > 14) ssid = ssid.substring(0, 12) + "..";
-            
-            StickCP2.Display.setTextColor(isKnown ? C_CYAN : C_WHITE);
+
+            StickCP2.Display.setTextColor(r.known ? C_CYAN : C_WHITE);
             StickCP2.Display.setCursor(22, y + 2);
             StickCP2.Display.print(ssid.c_str());
-            
-            // Show star for known networks
-            if (isKnown) {
+
+            if (r.known) {
                 StickCP2.Display.setCursor(SCREEN_W - 12, y + 2);
                 StickCP2.Display.print("*");
             }
         }
-        
-        // Show count if there are more networks
-        if (n > maxNetworks) {
+
+        if (n > (size_t)maxNetworks) {
             StickCP2.Display.setTextColor(C_DARKGRAY);
             StickCP2.Display.setCursor(6, startY + (maxNetworks * 18));
-            StickCP2.Display.printf("+%d more", n - maxNetworks);
+            StickCP2.Display.printf("+%d more", (int)(n - maxNetworks));
         }
     }
-    
-    WiFi.scanDelete();  // Free scan results memory
 }
 
 void drawDisconnectedScreen(int reason) {
@@ -346,7 +332,7 @@ void drawConnectedScreen() {
     StickCP2.Display.print("Press to Record");
 
     // WiFi SSID
-    String ssid = WiFi.SSID();
+    String ssid = StickNet::ssid();
     if (ssid.length() > 20) ssid = ssid.substring(0, 18) + "..";
     int nameW = ssid.length() * 6;
     StickCP2.Display.setTextColor(C_DARKGRAY);
@@ -354,7 +340,7 @@ void drawConnectedScreen() {
     StickCP2.Display.print(ssid.c_str());
 
     // Signal bars
-    drawWiFiBars(cx - 6, 156, WiFi.RSSI());
+    drawWiFiBars(cx - 6, 156, StickNet::rssi());
 
     drawFooter("Rec", "Disc");
 }
@@ -674,7 +660,7 @@ void init() {
 // ==========================================
 void tick() {
     // Check WiFi connection
-    if (WiFi.status() != WL_CONNECTED) {
+    if (!StickNet::isConnected()) {
         if (isWiFiConnected) {
             isWiFiConnected = false;
             isServerConnected = false;
@@ -770,7 +756,7 @@ void tick() {
     static unsigned long lastHeartbeat = 0;
     if (millis() - lastHeartbeat > 5000) {
         Serial.printf("[AiPin] heartbeat: wifi=%d server=%d rec=%d rssi=%d\n",
-                      isWiFiConnected, isServerConnected, isRecording, WiFi.RSSI());
+                      isWiFiConnected, isServerConnected, isRecording, StickNet::rssi());
         lastHeartbeat = millis();
     }
 
@@ -780,4 +766,29 @@ void tick() {
     }
 }
 
+void icon(int x, int y, uint16_t color) {
+    auto& d = StickCP2.Display;
+    d.fillRoundRect(x + 12, y, 12, 18, 6, color);
+    d.drawLine(x + 8,  y + 16, x + 8,  y + 22, color);
+    d.drawArc(x + 18, y + 16, 12, 11, 180, 360, color);
+    d.drawLine(x + 28, y + 16, x + 28, y + 22, color);
+    d.drawLine(x + 18, y + 22, x + 18, y + 28, color);
+    d.fillRect(x + 10, y + 28, 17, 2, color);
+}
+
 }  // namespace AiPinWifiApp
+
+#include <stick_os.h>
+
+static const stick_os::AppDescriptor kAipinDescriptor = {
+    /*id=*/       "aipin",
+    /*name=*/     "AiPin",
+    /*version=*/  "1.0.0",
+    /*category=*/ stick_os::CAT_UTILITY,
+    /*flags=*/    stick_os::APP_NEEDS_NET | stick_os::APP_NEEDS_MIC,
+    /*icon=*/     &AiPinWifiApp::icon,
+    /*runtime=*/  stick_os::RUNTIME_NATIVE,
+    /*native=*/   { &AiPinWifiApp::init, &AiPinWifiApp::tick, nullptr, nullptr },
+    /*script=*/   { nullptr, nullptr },
+};
+STICK_REGISTER_APP(kAipinDescriptor);
