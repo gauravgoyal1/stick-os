@@ -4,6 +4,8 @@ using namespace websockets;
 
 #include <stick_config.h>
 #include <stick_net.h>
+#include <stick_store.h>
+#include <status_strip.h>
 #include "aipin_wifi_app.h"
 
 namespace AiPinWifiApp {
@@ -139,22 +141,8 @@ void drawFilterIcon(int x, int y, uint16_t color) {
 }
 
 void drawHeader() {
-    StickCP2.Display.fillRect(0, 0, SCREEN_W, 22, StickCP2.Display.color565(20, 20, 60));
-    StickCP2.Display.setTextSize(1);
-
-    // Time on the left
-    auto dt = StickCP2.Rtc.getDateTime();
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(6, 6);
-    StickCP2.Display.printf("%02d:%02d", dt.time.hours, dt.time.minutes);
-
-    // Battery on the right
-    int batt = StickCP2.Power.getBatteryLevel();
-    StickCP2.Display.setCursor(100, 6);
-    if (batt > 50) StickCP2.Display.setTextColor(C_GREEN);
-    else if (batt > 20) StickCP2.Display.setTextColor(C_YELLOW);
-    else StickCP2.Display.setTextColor(C_RED);
-    StickCP2.Display.printf("%d%%", batt);
+    stick_os::statusStripDrawFull();
+    stick_os::statusStripTick("AiPin");
 }
 
 void drawFooter(const char* btnALabel, const char* btnBLabel) {
@@ -172,6 +160,10 @@ void drawFooter(const char* btnALabel, const char* btnBLabel) {
 // ==========================================
 bool connectToServer() {
     String url = String("ws://") + kStickServerHost + ":" + String(kStickServerPort) + "/services/aipin";
+    char apiKey[65];
+    if (stick_os::getApiKey(apiKey, sizeof(apiKey))) {
+        url += "?key=" + String(apiKey);
+    }
     Serial.printf("[AiPin] Connecting to %s\n", url.c_str());
     bool ok = wsClient.connect(url.c_str());
     if (ok) Serial.println("[AiPin] WebSocket connected");
@@ -209,7 +201,7 @@ void drawAvailableNetworks() {
     StickNet::ScanResult results[kMaxScan];
     size_t n = StickNet::scanNetworks(results, kMaxScan);
 
-    int startY = 100;
+    int startY = 96;
     int maxNetworks = 5;
 
     StickCP2.Display.setTextSize(1);
@@ -260,40 +252,40 @@ void drawDisconnectedScreen(int reason) {
         // Compact header for WiFi disconnected
         StickCP2.Display.setTextSize(1);
         StickCP2.Display.setTextColor(C_RED);
-        StickCP2.Display.setCursor(6, 30);
+        StickCP2.Display.setCursor(6, 24);
         StickCP2.Display.print("WiFi Disconnected");
-        
+
         // Draw small WiFi icon with slash
-        drawWiFiIcon(SCREEN_W - 20, 26, C_GRAY);
-        StickCP2.Display.drawLine(SCREEN_W - 20, 38, SCREEN_W - 8, 26, C_RED);
-        
+        drawWiFiIcon(SCREEN_W - 20, 20, C_GRAY);
+        StickCP2.Display.drawLine(SCREEN_W - 20, 32, SCREEN_W - 8, 20, C_RED);
+
         // Scanning indicator
         StickCP2.Display.setTextColor(C_DARKGRAY);
-        StickCP2.Display.setCursor(6, 50);
+        StickCP2.Display.setCursor(6, 44);
         StickCP2.Display.print("Scanning...");
-        
+
         // Draw available networks
-        StickCP2.Display.setCursor(6, 70);
+        StickCP2.Display.setCursor(6, 64);
         drawAvailableNetworks();
         
     } else if (reason == DISC_SERVER) {
-        drawWiFiIcon(cx - 6, 60, C_GREEN);
+        drawWiFiIcon(cx - 6, 56, C_GREEN);
 
-        drawLargeServerIcon(cx, 100, C_RED);
-        drawSlash(cx, 100, 14, C_RED);
+        drawLargeServerIcon(cx, 96, C_RED);
+        drawSlash(cx, 96, 14, C_RED);
 
         StickCP2.Display.setTextSize(1);
         StickCP2.Display.setTextColor(C_RED);
-        StickCP2.Display.setCursor(cx - 27, 130);
+        StickCP2.Display.setCursor(cx - 27, 126);
         StickCP2.Display.print("No Server");
 
         StickCP2.Display.setTextColor(C_DARKGRAY);
-        StickCP2.Display.setCursor(cx - 42, 155);
+        StickCP2.Display.setCursor(cx - 42, 151);
         StickCP2.Display.print("Reconnecting...");
     } else {
         StickCP2.Display.setTextSize(1);
         StickCP2.Display.setTextColor(C_GRAY);
-        StickCP2.Display.setCursor(cx - 36, 100);
+        StickCP2.Display.setCursor(cx - 36, 96);
         StickCP2.Display.print("Disconnected");
     }
 
@@ -310,22 +302,22 @@ void drawConnectedScreen() {
     int cx = SCREEN_W / 2;
 
     // Green circle with checkmark
-    StickCP2.Display.fillCircle(cx, 72, 18, C_GREEN);
-    StickCP2.Display.drawLine(cx - 8, 72, cx - 2, 80, C_BLACK);
-    StickCP2.Display.drawLine(cx - 7, 72, cx - 1, 80, C_BLACK);
-    StickCP2.Display.drawLine(cx - 2, 80, cx + 10, 64, C_BLACK);
-    StickCP2.Display.drawLine(cx - 1, 80, cx + 11, 64, C_BLACK);
+    StickCP2.Display.fillCircle(cx, 68, 18, C_GREEN);
+    StickCP2.Display.drawLine(cx - 8, 68, cx - 2, 76, C_BLACK);
+    StickCP2.Display.drawLine(cx - 7, 68, cx - 1, 76, C_BLACK);
+    StickCP2.Display.drawLine(cx - 2, 76, cx + 10, 60, C_BLACK);
+    StickCP2.Display.drawLine(cx - 1, 76, cx + 11, 60, C_BLACK);
 
     // "Ready"
     StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(cx - 30, 100);
+    StickCP2.Display.setCursor(cx - 30, 96);
     StickCP2.Display.print("Ready");
 
     // "Press to Record"
     StickCP2.Display.setTextSize(1);
     StickCP2.Display.setTextColor(C_GRAY);
-    StickCP2.Display.setCursor(cx - 42, 122);
+    StickCP2.Display.setCursor(cx - 42, 118);
     StickCP2.Display.print("Press to Record");
 
     // WiFi SSID
@@ -333,11 +325,11 @@ void drawConnectedScreen() {
     if (ssid.length() > 20) ssid = ssid.substring(0, 18) + "..";
     int nameW = ssid.length() * 6;
     StickCP2.Display.setTextColor(C_DARKGRAY);
-    StickCP2.Display.setCursor(cx - nameW / 2, 140);
+    StickCP2.Display.setCursor(cx - nameW / 2, 136);
     StickCP2.Display.print(ssid.c_str());
 
     // Signal bars
-    drawWiFiBars(cx - 6, 156, StickNet::rssi());
+    drawWiFiBars(cx - 6, 152, StickNet::rssi());
 
     drawFooter("Rec", "Disc");
 }
@@ -390,11 +382,14 @@ void sendStreamHeader() {
 
     Serial.printf("[AiPin] Sending APST header (connected=%d)\n", wsClient.available());
 
-    wsClient.sendBinary((const char*)STREAM_START_MAGIC, 4);
-    wsClient.sendBinary((const char*)&sampleRate, 4);
-    wsClient.sendBinary((const char*)&bitDepth, 2);
-    wsClient.sendBinary((const char*)&channels, 2);
-    
+    // Pack into a single 12-byte message (server expects one receive)
+    uint8_t header[12];
+    memcpy(header,     STREAM_START_MAGIC, 4);
+    memcpy(header + 4, &sampleRate, 4);
+    memcpy(header + 8, &bitDepth, 2);
+    memcpy(header + 10, &channels, 2);
+    wsClient.sendBinary((const char*)header, 12);
+
     Serial.println("[AiPin] Header sent");
 }
 
@@ -439,13 +434,10 @@ void drawRecordingScreen() {
 
     int cx = SCREEN_W / 2;
 
-    // Red recording dot in header (after time)
-    StickCP2.Display.fillCircle(42, 7, 3, C_RED);
-
     // Duration timer
     StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(cx - 30, 32);
+    StickCP2.Display.setCursor(cx - 30, 26);
     StickCP2.Display.print("00:00");
 
     // Initial flat waveform
@@ -462,16 +454,11 @@ void updateRecordingDisplay() {
     int cx = SCREEN_W / 2;
 
     // Update timer
-    StickCP2.Display.fillRect(cx - 30, 32, 60, 16, C_BLACK);
+    StickCP2.Display.fillRect(cx - 30, 26, 60, 16, C_BLACK);
     StickCP2.Display.setTextSize(2);
     StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(cx - 30, 32);
+    StickCP2.Display.setCursor(cx - 30, 26);
     StickCP2.Display.printf("%02d:%02d", mins, secs);
-
-    // Blink recording dot in header
-    bool dotVisible = ((millis() / 500) % 2 == 0);
-    uint16_t headerBg = StickCP2.Display.color565(20, 20, 60);
-    StickCP2.Display.fillCircle(42, 7, 3, dotVisible ? C_RED : headerBg);
 
     // Update waveform
     drawWaveform();

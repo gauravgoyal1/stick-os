@@ -31,12 +31,12 @@ void drawTime() {
     // MM:SS
     d.setTextSize(3);
     d.setTextColor(color, BLACK);
-    d.setCursor(10, 60);
+    d.setCursor(6, 60);
     d.printf("%02d:%02d", minutes, seconds);
 
     // .ms
     d.setTextSize(2);
-    d.setCursor(100, 66);
+    d.setCursor(96, 66);
     d.printf(".%02d", centis);
 
     g_justReset = false;

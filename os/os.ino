@@ -324,6 +324,18 @@ void processSerialCommand() {
         } else {
             Serial.printf("ERR: \"%s\" not found\n", ssid.c_str());
         }
+    } else if (line.startsWith("APIKEY_SET ")) {
+        String key = line.substring(11);
+        if (key.length() == 0) { Serial.println("ERR: usage APIKEY_SET <key>"); return; }
+        stick_os::saveApiKey(key.c_str());
+        Serial.println("OK: API key saved");
+    } else if (line == "APIKEY_GET") {
+        char key[65];
+        if (stick_os::getApiKey(key, sizeof(key))) {
+            Serial.printf("OK: %s\n", key);
+        } else {
+            Serial.println("(no API key stored)");
+        }
     }
 }
 

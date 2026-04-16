@@ -61,6 +61,18 @@ WiFi credentials are stored in NVS (device flash), never in source code. Three w
 
 On boot, the OS tries the last connected network, then shows a WiFi picker if it fails. Open/public networks are available as fallback.
 
+## API key setup
+
+Services (like AiPin WebSocket) require a shared API key. The key is stored in NVS on the device and validated by the server via `STICK_API_KEY` env var.
+
+```bash
+# Set API key on device
+./tools/wifi_seed.py apikey-set --port /dev/cu.usbserial-XXXX --key "your-secret-key"
+
+# Verify stored key
+./tools/wifi_seed.py apikey-get --port /dev/cu.usbserial-XXXX
+```
+
 ## Device configuration
 
 `libraries/stick_config/stick_config.h` (gitignored) contains the server host. Copy from `.h.example`:

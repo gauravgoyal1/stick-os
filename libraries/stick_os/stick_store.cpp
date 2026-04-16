@@ -144,4 +144,15 @@ bool getLastConnectedSSID(char* out, size_t outSize) {
     return s.getStr("last", out, outSize) > 0;
 }
 
+bool saveApiKey(const char* key) {
+    StickStore s("stick_auth");
+    s.putStr("apikey", key);
+    return true;
+}
+
+bool getApiKey(char* out, size_t outSize) {
+    StickStore s("stick_auth");
+    return s.getStr("apikey", out, outSize) > 0;
+}
+
 }  // namespace stick_os

@@ -52,6 +52,15 @@ WiFi credentials are stored in NVS (device flash), never in source code.
 ./tools/wifi_seed.py delete --port /dev/cu.usbserial-XXXX --ssid "MyNetwork"
 ```
 
+### API key
+
+Services require a shared API key stored in NVS and validated server-side.
+
+```bash
+./tools/wifi_seed.py apikey-set --port /dev/cu.usbserial-XXXX --key "your-secret-key"
+./tools/wifi_seed.py apikey-get --port /dev/cu.usbserial-XXXX
+```
+
 ### Server
 
 ```bash

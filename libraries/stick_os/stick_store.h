@@ -52,4 +52,8 @@ bool   deleteWiFiCred(const char* ssid);
 void   setLastConnectedSSID(const char* ssid);
 bool   getLastConnectedSSID(char* out, size_t outSize);
 
+// API key storage in NVS for service authentication.
+bool   saveApiKey(const char* key);
+bool   getApiKey(char* out, size_t outSize);
+
 }  // namespace stick_os

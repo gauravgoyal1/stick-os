@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 log = logging.getLogger("aipin")
 
@@ -45,6 +45,12 @@ Begin transcription:"""
 
 @router.websocket("/aipin")
 async def aipin_stream(websocket: WebSocket):
+    expected_key = os.getenv("STICK_API_KEY", "")
+    client_key = websocket.query_params.get("key", "")
+    if not expected_key or client_key != expected_key:
+        log.warning("AiPin auth failed (key=%s)", "missing" if not client_key else "mismatch")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     await websocket.accept()
     log.info("AiPin client connected")
 

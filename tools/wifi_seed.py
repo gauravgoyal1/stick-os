@@ -23,6 +23,13 @@ def main():
     rm.add_argument("--port", required=True)
     rm.add_argument("--ssid", required=True)
 
+    ak_set = sub.add_parser("apikey-set", help="Set API key for service auth")
+    ak_set.add_argument("--port", required=True)
+    ak_set.add_argument("--key", required=True)
+
+    ak_get = sub.add_parser("apikey-get", help="Show stored API key")
+    ak_get.add_argument("--port", required=True)
+
     args = p.parse_args()
 
     with serial.Serial(args.port, 115200, timeout=3) as s:
@@ -35,6 +42,10 @@ def main():
             s.write(b"WIFI_LIST\n")
         elif args.cmd == "delete":
             s.write(f"WIFI_DEL {args.ssid}\n".encode())
+        elif args.cmd == "apikey-set":
+            s.write(f"APIKEY_SET {args.key}\n".encode())
+        elif args.cmd == "apikey-get":
+            s.write(b"APIKEY_GET\n")
 
         time.sleep(0.5)
         while s.in_waiting:
