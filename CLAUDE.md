@@ -4,38 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repo overview
 
-`electronics-lab` is a sandbox for small electronics / M5StickC Plus 2 / ESP32 projects. Each top-level directory is either a single-sketch mini app or an **umbrella** grouping related components (one sketch plus helpers, or several related sketches). Sub-projects share some tooling (`tools/flash.sh`, `libraries/`) but otherwise don't depend on each other.
+`stick-os` is a monorepo for the Stick OS platform — a launcher firmware for the M5StickC Plus 2 (ESP32), a FastAPI backend server, and tooling for building and publishing apps.
 
-## Current sub-projects
+## Directory structure
 
-- **`aipin/`** — AiPin audio streamer sub-project. Two firmware variants (`bl/` Bluetooth SPP, `wifi/` WiFi+TCP) plus a Python host-side server under `server/`. The WiFi variant's implementation lives in `libraries/aipin_wifi_app/`; `aipin/wifi/wifi.ino` is a thin wrapper for solo flashing. The canonical production target is `stick/`. See `aipin/CLAUDE.md` for architecture and build notes.
-- **Game libraries** — Seven standalone game apps under `libraries/game_{flappy,dino,scream,galaxy,balance,simon,panic}/`, each registered via `STICK_REGISTER_APP(...)` under the GAMES category. Shared arcade helpers (colors, noise level, high-score persistence via StickStore) live in `libraries/arcade_common/`.
-- **`clap_remote/`** — Clap-activated IR remote for a TCL Mini LED TV. Phase 1 in progress. See `clap_remote/CLAUDE.md` and `clap_remote/docs/superpowers/` for spec, plan, and working notes.
-- **`diagnostics/`** — Project-agnostic hardware test sketches: `hello_world/`, `ir_probe/`, `ir_sweep/`, `wifi_scan/`. Good for first-time peripheral sanity checks or hardware probes that aren't tied to any one project.
-- **`stick/`** — The Stick OS launcher. Boots to a two-level home in portrait mode (category picker → app list) driven by a static app registry in `libraries/stick_os/`. Apps register via `STICK_REGISTER_APP(...)`; adding a new native app is a library add under `libraries/` plus an `#include` in `stick.ino` for arduino-cli discovery — no other edits needed. Categories: GAME, UTILITY, SENSOR, SETTINGS. Current apps: seven game libraries under GAMES and AiPin-WiFi under UTILITIES. `stick_os` owns a top status strip (WiFi bars, battery icon, clock) on launcher screens. Short PWR-click exits any running app back to the app list. Last-visited category + last-app-per-category persist across reboots via `StickStore`. WiFi + NTP run on a background FreeRTOS task (`libraries/stick_net/`). Production target for the StickC Plus 2.
+- **`os/`** — Stick OS firmware (Arduino sketch). The main sketch is `os/os.ino`. Boots to a portrait-mode category picker (Games / Apps / Sensors / Settings) driven by the app registry in `libraries/stick_os/`.
+- **`libraries/`** — Shared Arduino C++ libraries. Each app is a self-contained library that registers via `STICK_REGISTER_APP(...)`. Adding a new native app = create a library + add an `#include` in `os/os.ino`.
+- **`server/`** — FastAPI backend. Serves the app catalog, firmware updates, WiFi credentials, and AiPin WebSocket audio streaming. Runs as a single uvicorn process.
+- **`apps/`** — MicroPython app sources (Phase 2, not yet active).
+- **`tools/`** — Build, flash, and publish tooling.
+- **`docs/`** — Design specs and implementation plans.
 
-## Shared libraries convention
+## Current apps (15 native)
 
-Shared Arduino C++ libraries live in `libraries/` at the repo root. `tools/flash.sh` passes this directory to `arduino-cli compile` via `--libraries`, so any sketch can `#include` from it without extra configuration. The directory starts empty and fills organically when a second sketch wants a helper — there is no speculative sharing.
+**Games (7):** `game_flappy`, `game_dino`, `game_scream`, `game_galaxy`, `game_balance`, `game_simon`, `game_panic` — each in `libraries/game_*/`
+**Apps (1):** `aipin_wifi_app` — audio streaming via WebSocket to `/services/aipin`
+**Sensors (3):** `sensor_battery`, `sensor_imu`, `sensor_wifi_scan`
+**Settings (4):** `settings_about`, `settings_wifi`, `settings_storage`, `settings_apps`
 
-Some libraries under `libraries/` are **gitignored config files**: `wifi_config/wifi_config.h` holds WiFi credentials and `secrets_config/secrets_config.h` holds server endpoints and other runtime secrets. Each has a tracked `.example` template; on a fresh clone, `cp *.h.example *.h` and fill in your values. Sketches include them via `#include <wifi_config.h>` / `#include <secrets_config.h>` and the `--libraries` flag on `flash.sh` handles discovery.
+Shared game helpers live in `libraries/arcade_common/`.
 
 ## Build & Upload
 
-Uses `arduino-cli` with the M5Stack board package. `tools/flash.sh` is the usual entry point for any Arduino sketch in the repo.
-
 ```bash
-# Compile + upload in one shot
-./tools/flash.sh stick           # production target: OS launcher + all apps
-./tools/flash.sh aipin/wifi      # solo aipin/wifi
-./tools/flash.sh aipin/bl
-./tools/flash.sh clap_remote
-./tools/flash.sh diagnostics/ir_probe
+# Compile + upload the OS firmware
+./tools/flash.sh os
 
-# Compile only, no upload
+# Compile only (no upload)
 arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 \
-  --libraries "$(git rev-parse --show-toplevel)/libraries" \
-  <sketch-dir>
+  --libraries "$(git rev-parse --show-toplevel)/libraries" os
 
 # Find the device port
 arduino-cli board list
@@ -45,8 +42,60 @@ arduino-cli board list
 - ESP32: `https://dl.espressif.com/dl/package_esp32_index.json`
 - M5Stack: `https://static-cdn.m5stack.com/resource/arduino/package_m5stack_index.json`
 
-**Required libraries**: M5Unified, M5StickCPlus2, BluetoothSerial (ESP32 core, BT variant only), WiFi (ESP32 core, WiFi variant only), IRremote (clap_remote, ir_probe, ir_sweep), arduinoFFT (clap_remote detector).
+**Required libraries**: M5Unified, M5StickCPlus2, ArduinoWebsockets.
 
-## Host-side tooling
+## WiFi setup
 
-See `aipin/CLAUDE.md` for the Python receivers (`aipin/bl/receiver.py`, `aipin/server/server.py`) and the `GEMINI_API_KEY` requirement for transcription.
+WiFi credentials are stored in NVS (device flash), never in source code. Three ways to add networks:
+
+```bash
+# Seed via USB serial
+./tools/wifi_seed.py add --port /dev/cu.usbserial-XXXX --ssid "MyNetwork" --password "secret"
+
+# List stored networks
+./tools/wifi_seed.py list --port /dev/cu.usbserial-XXXX
+
+# Delete a network
+./tools/wifi_seed.py delete --port /dev/cu.usbserial-XXXX --ssid "MyNetwork"
+```
+
+On boot, the OS tries the last connected network, then shows a WiFi picker if it fails. Open/public networks are available as fallback.
+
+## Device configuration
+
+`libraries/stick_config/stick_config.h` (gitignored) contains the server host. Copy from `.h.example`:
+
+```bash
+cp libraries/stick_config/stick_config.h.example libraries/stick_config/stick_config.h
+# Edit stick_config.h with your server host
+```
+
+## Server
+
+```bash
+cd server
+pip install -r requirements.txt
+cp .env.example .env  # fill in GEMINI_API_KEY, STICK_DOMAIN
+uvicorn main:app --host 0.0.0.0 --port 8765
+```
+
+**Endpoints:**
+- `GET /api/catalog` — app catalog JSON
+- `GET /api/firmware` — firmware version JSON
+- `GET /api/wifi` — WiFi credentials for device sync
+- `GET /apps/{id}/{file}` — app package downloads
+- `GET /firmware/{file}` — firmware binary downloads
+- `WS /services/aipin` — AiPin audio streaming + Gemini transcription
+
+## Storage optimization
+
+The M5StickC Plus 2 has 8 MB flash. Current firmware: ~1.3 MB (39%). Every feature must justify its flash cost — measure compiled size after every change. Budget rule: > 50 KB for a non-core feature needs explicit justification.
+
+## Conventions
+
+- Apps register via `STICK_REGISTER_APP(...)` with an `AppDescriptor` struct
+- Apps use portrait mode (`setRotation(0)`) for launcher screens; games choose their own rotation
+- WiFi state goes through `StickNet::` — apps never `#include <WiFi.h>` (except stick_os internals)
+- PWR-click exits any app via `stick_os::checkAppExit()` / `ArcadeCommon::updateAndCheckExit()`
+- Per-app storage uses `StickStore` (scoped NVS namespaces)
+- No Co-Authored-By lines in commits
