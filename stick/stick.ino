@@ -252,6 +252,7 @@ void enterApp(const AppDescriptor* app) {
     // Don't draw the strip before the app — the app will set its own
     // rotation and the strip would end up in the wrong orientation.
     // statusStripTick() runs every 500ms in loop() AFTER the app's tick().
+    stick_os::logHeap(app->name);
     app->native.init();
     g_state = ST_APP;
     g_btnDrainFrames = 8;
@@ -337,7 +338,7 @@ void loop() {
         // stick_os::checkAppExit(), transition back to the app list.
         if (stick_os::wasExitRequested()) {
             stick_os::clearExitRequest();
-            Serial.println("[stick] exit requested -> list");
+            stick_os::logHeap("exit");
             g_runningApp = nullptr;
             enterAppList(g_openCategory);
         }
