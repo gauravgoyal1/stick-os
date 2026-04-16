@@ -1,5 +1,6 @@
 #include <M5StickCPlus2.h>
-#include <WiFiClient.h>
+#include <ArduinoWebsockets.h>
+using namespace websockets;
 
 #include <stick_config.h>
 #include <stick_net.h>
@@ -7,7 +8,7 @@
 
 namespace AiPinWifiApp {
 
-WiFiClient client;
+WebsocketsClient wsClient;
 
 // ==========================================
 //          DISPLAY CONFIGURATION
@@ -170,15 +171,12 @@ void drawFooter(const char* btnALabel, const char* btnBLabel) {
 //        SERVER CONNECTION
 // ==========================================
 bool connectToServer() {
-    Serial.printf("[AiPin] Connecting to server %s:%d\n", kAiPinServerHost, kAiPinServerPort);
-    
-    if (client.connect(kAiPinServerHost, kAiPinServerPort)) {
-        Serial.println("[AiPin] Connected to server!");
-        return true;
-    }
-    
-    Serial.println("[AiPin] Server connection failed");
-    return false;
+    String url = String("ws://") + kStickServerHost + ":" + String(kStickServerPort) + "/services/aipin";
+    Serial.printf("[AiPin] Connecting to %s\n", url.c_str());
+    bool ok = wsClient.connect(url.c_str());
+    if (ok) Serial.println("[AiPin] WebSocket connected");
+    else    Serial.println("[AiPin] WebSocket failed");
+    return ok;
 }
 
 // ==========================================
@@ -390,20 +388,18 @@ void sendStreamHeader() {
     uint16_t bitDepth   = AUDIO_BIT_DEPTH;
     uint16_t channels   = AUDIO_CHANNELS;
 
-    Serial.printf("[AiPin] Sending APST header (connected=%d)\n", client.connected());
-    
-    client.write(STREAM_START_MAGIC, 4);
-    client.write((uint8_t*)&sampleRate, 4);
-    client.write((uint8_t*)&bitDepth, 2);
-    client.write((uint8_t*)&channels, 2);
-    client.flush();
+    Serial.printf("[AiPin] Sending APST header (connected=%d)\n", wsClient.available());
+
+    wsClient.sendBinary((const char*)STREAM_START_MAGIC, 4);
+    wsClient.sendBinary((const char*)&sampleRate, 4);
+    wsClient.sendBinary((const char*)&bitDepth, 2);
+    wsClient.sendBinary((const char*)&channels, 2);
     
     Serial.println("[AiPin] Header sent");
 }
 
 void sendStreamStop() {
-    client.write(STREAM_STOP_MAGIC, 4);
-    client.flush();
+    wsClient.sendBinary((const char*)STREAM_STOP_MAGIC, 4);
 }
 
 // ==========================================
@@ -566,13 +562,13 @@ void captureAndStreamChunk() {
         waveformIndex = (waveformIndex + 1) % WAVEFORM_BARS;
 
         // 5. Send over TCP
-        size_t written = client.write((uint8_t*)txBuffer, AUDIO_CHUNK_SAMPLES);
+        bool written = wsClient.sendBinary((const char*)txBuffer, AUDIO_CHUNK_SAMPLES);
 
         // Debug logging
         chunkCount++;
         if (millis() - lastChunkLog > 2000) {
-            Serial.printf("[AiPin] chunks=%d last_write=%d/%d\n",
-                          chunkCount, written, AUDIO_CHUNK_SAMPLES);
+            Serial.printf("[AiPin] chunks=%d last_write=%s\n",
+                          chunkCount, written ? "ok" : "fail");
             lastChunkLog = millis();
         }
     }
@@ -594,7 +590,7 @@ void disconnectDevice() {
         delay(50);
     }
 
-    client.stop();
+    wsClient.close();
     isServerConnected = false;
 
     StickCP2.Speaker.tone(800, 100);
@@ -688,7 +684,7 @@ void tick() {
     isWiFiConnected = true;
 
     // Check server connection
-    if (!client.connected()) {
+    if (!wsClient.available()) {
         if (isServerConnected) {
             isServerConnected = false;
             if (isRecording) {
