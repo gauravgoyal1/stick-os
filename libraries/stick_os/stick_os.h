@@ -8,3 +8,4 @@
 #include "app_context.h"
 #include "stick_store.h"
 #include "status_strip.h"
+#include "wifi_picker.h"

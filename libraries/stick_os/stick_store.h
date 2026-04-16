@@ -38,4 +38,18 @@ private:
     Preferences prefs_;
 };
 
+// WiFi credential storage in NVS. Max 8 networks.
+constexpr size_t kMaxWiFiNetworks = 8;
+
+struct WiFiCred {
+    char ssid[33];
+    char pass[65];
+};
+
+size_t loadWiFiCreds(WiFiCred* out, size_t maxCount);
+bool   saveWiFiCred(const char* ssid, const char* pass);
+bool   deleteWiFiCred(const char* ssid);
+void   setLastConnectedSSID(const char* ssid);
+bool   getLastConnectedSSID(char* out, size_t outSize);
+
 }  // namespace stick_os

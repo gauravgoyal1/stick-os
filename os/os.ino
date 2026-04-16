@@ -286,6 +286,40 @@ void tickAppList() {
     }
 }
 
+void processSerialCommand() {
+    if (!Serial.available()) return;
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) return;
+
+    if (line.startsWith("WIFI_SET ")) {
+        String rest = line.substring(9);
+        int space = rest.indexOf(' ');
+        if (space < 0) { Serial.println("ERR: usage WIFI_SET ssid password"); return; }
+        String ssid = rest.substring(0, space);
+        String pass = rest.substring(space + 1);
+        if (stick_os::saveWiFiCred(ssid.c_str(), pass.c_str())) {
+            Serial.printf("OK: saved \"%s\"\n", ssid.c_str());
+        } else {
+            Serial.println("ERR: max networks reached");
+        }
+    } else if (line == "WIFI_LIST") {
+        stick_os::WiFiCred creds[stick_os::kMaxWiFiNetworks];
+        size_t n = stick_os::loadWiFiCreds(creds, stick_os::kMaxWiFiNetworks);
+        for (size_t i = 0; i < n; i++) {
+            Serial.printf("%u: %s\n", (unsigned)i, creds[i].ssid);
+        }
+        if (n == 0) Serial.println("(no networks stored)");
+    } else if (line.startsWith("WIFI_DEL ")) {
+        String ssid = line.substring(9);
+        if (stick_os::deleteWiFiCred(ssid.c_str())) {
+            Serial.printf("OK: deleted \"%s\"\n", ssid.c_str());
+        } else {
+            Serial.printf("ERR: \"%s\" not found\n", ssid.c_str());
+        }
+    }
+}
+
 }  // namespace
 
 void setup() {
@@ -300,7 +334,36 @@ void setup() {
         Serial.printf("  [%u] %s (cat=%u)\n", (unsigned)i, d->name, d->category);
     }
 
-    StickNet::startAsync();
+    // WiFi: try last-connected SSID first, fall back to picker
+    {
+        char lastSSID[33] = {0};
+        bool connected = false;
+
+        if (stick_os::getLastConnectedSSID(lastSSID, sizeof(lastSSID)) && lastSSID[0] != '\0') {
+            StickCP2.Display.setRotation(0);
+            StickCP2.Display.fillScreen(BLACK);
+            StickCP2.Display.setTextSize(1);
+            StickCP2.Display.setTextColor(YELLOW, BLACK);
+            StickCP2.Display.setCursor(20, 100);
+            StickCP2.Display.printf("Connecting to\n  %s...", lastSSID);
+
+            StickNet::startAsync();
+            StickNet::waitForReady(10000);
+            connected = StickNet::isConnected();
+        }
+
+        if (!connected) {
+            connected = stick_os::showWiFiPicker();
+            if (connected) {
+                StickNet::syncNTP();
+            }
+        }
+
+        if (!connected) {
+            Serial.println("[stick] no WiFi — proceeding offline");
+        }
+    }
+
     stick_os::statusStripInit();
 
     enterCategories();
@@ -308,6 +371,7 @@ void setup() {
 
 void loop() {
     StickCP2.update();
+    processSerialCommand();
 
     if (g_btnDrainFrames > 0) { g_btnDrainFrames--; delay(10); return; }
 

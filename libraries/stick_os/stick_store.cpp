@@ -68,4 +68,80 @@ void StickStore::clear() {
     open_(false); prefs_.clear(); close_();
 }
 
+size_t loadWiFiCreds(WiFiCred* out, size_t maxCount) {
+    StickStore s("wifi_creds");
+    size_t count = s.getU8("count", 0);
+    if (count > maxCount) count = maxCount;
+    for (size_t i = 0; i < count; i++) {
+        char keyS[8], keyP[8];
+        snprintf(keyS, sizeof(keyS), "s%u", (unsigned)i);
+        snprintf(keyP, sizeof(keyP), "p%u", (unsigned)i);
+        s.getStr(keyS, out[i].ssid, sizeof(out[i].ssid));
+        s.getStr(keyP, out[i].pass, sizeof(out[i].pass));
+    }
+    return count;
+}
+
+bool saveWiFiCred(const char* ssid, const char* pass) {
+    StickStore s("wifi_creds");
+    size_t count = s.getU8("count", 0);
+    // Check if already exists — update in place
+    for (size_t i = 0; i < count; i++) {
+        char keyS[8], buf[33];
+        snprintf(keyS, sizeof(keyS), "s%u", (unsigned)i);
+        s.getStr(keyS, buf, sizeof(buf));
+        if (strcmp(buf, ssid) == 0) {
+            char keyP[8];
+            snprintf(keyP, sizeof(keyP), "p%u", (unsigned)i);
+            s.putStr(keyP, pass);
+            return true;
+        }
+    }
+    if (count >= kMaxWiFiNetworks) return false;
+    char keyS[8], keyP[8];
+    snprintf(keyS, sizeof(keyS), "s%u", (unsigned)count);
+    snprintf(keyP, sizeof(keyP), "p%u", (unsigned)count);
+    s.putStr(keyS, ssid);
+    s.putStr(keyP, pass);
+    s.putU8("count", count + 1);
+    return true;
+}
+
+bool deleteWiFiCred(const char* ssid) {
+    StickStore s("wifi_creds");
+    size_t count = s.getU8("count", 0);
+    for (size_t i = 0; i < count; i++) {
+        char keyS[8], buf[33];
+        snprintf(keyS, sizeof(keyS), "s%u", (unsigned)i);
+        s.getStr(keyS, buf, sizeof(buf));
+        if (strcmp(buf, ssid) == 0) {
+            // Shift remaining entries down
+            for (size_t j = i; j < count - 1; j++) {
+                char kS1[8], kP1[8], kS2[8], kP2[8], tmpS[33], tmpP[65];
+                snprintf(kS1, sizeof(kS1), "s%u", (unsigned)(j + 1));
+                snprintf(kP1, sizeof(kP1), "p%u", (unsigned)(j + 1));
+                snprintf(kS2, sizeof(kS2), "s%u", (unsigned)j);
+                snprintf(kP2, sizeof(kP2), "p%u", (unsigned)j);
+                s.getStr(kS1, tmpS, sizeof(tmpS));
+                s.getStr(kP1, tmpP, sizeof(tmpP));
+                s.putStr(kS2, tmpS);
+                s.putStr(kP2, tmpP);
+            }
+            s.putU8("count", count - 1);
+            return true;
+        }
+    }
+    return false;
+}
+
+void setLastConnectedSSID(const char* ssid) {
+    StickStore s("wifi_creds");
+    s.putStr("last", ssid);
+}
+
+bool getLastConnectedSSID(char* out, size_t outSize) {
+    StickStore s("wifi_creds");
+    return s.getStr("last", out, outSize) > 0;
+}
+
 }  // namespace stick_os
