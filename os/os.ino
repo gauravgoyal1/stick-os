@@ -27,6 +27,7 @@
 #include <sensor_imu.h>
 #include <sensor_mic.h>
 #include <app_stopwatch.h>
+#include <app_flashlight.h>
 #include <settings_wifi.h>
 #include <settings_storage.h>
 #include <settings_apps.h>
