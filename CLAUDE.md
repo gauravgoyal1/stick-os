@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current apps (19 native)
 
 **Games (7):** `game_flappy`, `game_dino`, `game_scream`, `game_galaxy`, `game_balance`, `game_simon`, `game_panic` — each in `libraries/game_*/`
-**Apps (3):** `aipin_wifi_app` (audio streaming via WebSocket), `app_stopwatch`, `app_flashlight`
+**Apps (3):** `aipin_wifi_app` (Scribe — audio streaming via WebSocket), `app_stopwatch`, `app_flashlight`
 **Sensors (4):** `sensor_battery`, `sensor_imu`, `sensor_wifi_scan`, `sensor_mic`
 **Settings (5):** `settings_about`, `settings_wifi`, `settings_storage`, `settings_apps`, `settings_time`
 
