@@ -27,6 +27,7 @@
 #include <sensor_imu.h>
 #include <settings_wifi.h>
 #include <settings_storage.h>
+#include <settings_apps.h>
 
 namespace {
 
