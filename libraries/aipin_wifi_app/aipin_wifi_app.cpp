@@ -17,6 +17,7 @@ WebsocketsClient wsClient;
 // ==========================================
 #define SCREEN_W 135
 #define SCREEN_H 240
+#define CONTENT_Y 18  // below OS status strip
 
 uint16_t C_BLACK, C_WHITE, C_GREEN, C_RED, C_CYAN, C_YELLOW, C_ORANGE, C_GRAY, C_DARKGRAY;
 
@@ -41,7 +42,6 @@ void initColors() {
 #define AUDIO_CHUNK_SAMPLES  1024
 #define AUDIO_CHUNK_BYTES    (AUDIO_CHUNK_SAMPLES * 1)
 
-#define LIST_TOP_Y 28
 #define LED_PIN 19
 
 // Disconnect reason constants
@@ -73,7 +73,7 @@ float lpf_prev_output = 0.0;
 #define WAVEFORM_BAR_W   2
 #define WAVEFORM_BAR_GAP 1
 #define WAVEFORM_HEIGHT  100
-#define WAVEFORM_Y       130
+#define WAVEFORM_Y       140
 
 uint8_t waveformBuffer[WAVEFORM_BARS] = {0};
 int waveformIndex = 0;
@@ -85,6 +85,10 @@ const uint8_t STREAM_STOP_MAGIC[4]  = {0x41, 0x50, 0x4E, 0x44}; // "APND"
 // ==========================================
 //        DRAWING HELPERS
 // ==========================================
+void clearContent() {
+    StickCP2.Display.fillRect(0, CONTENT_Y, SCREEN_W, SCREEN_H - CONTENT_Y, C_BLACK);
+}
+
 void drawWiFiBars(int x, int y, int rssi) {
     int bars = 0;
     if (rssi >= -50) bars = 4;
@@ -105,80 +109,11 @@ void drawWiFiBars(int x, int y, int rssi) {
 // ==========================================
 //        ICON DRAWING FUNCTIONS
 // ==========================================
-void drawMicIcon(int x, int y, uint16_t color) {
-    StickCP2.Display.fillRoundRect(x + 3, y, 6, 9, 2, color);
-    StickCP2.Display.drawLine(x + 6, y + 9, x + 6, y + 13, color);
-    StickCP2.Display.drawLine(x + 3, y + 11, x + 9, y + 11, color);
-    StickCP2.Display.drawLine(x + 2, y + 13, x + 10, y + 13, color);
-}
-
 void drawWiFiIcon(int x, int y, uint16_t color) {
-    // WiFi symbol - concentric arcs
     StickCP2.Display.drawArc(x + 6, y + 10, 9, 7, 220, 320, color);
     StickCP2.Display.drawArc(x + 6, y + 10, 6, 5, 220, 320, color);
     StickCP2.Display.drawArc(x + 6, y + 10, 3, 2, 220, 320, color);
     StickCP2.Display.fillCircle(x + 6, y + 10, 1, color);
-}
-
-void drawWaveIcon(int x, int y, uint16_t color) {
-    StickCP2.Display.drawLine(x, y + 4, x + 1, y + 2, color);
-    StickCP2.Display.drawLine(x + 1, y + 2, x + 2, y, color);
-    StickCP2.Display.drawLine(x, y + 4, x + 1, y + 6, color);
-    StickCP2.Display.drawLine(x + 1, y + 6, x + 2, y + 8, color);
-    StickCP2.Display.drawLine(x + 4, y + 4, x + 5, y + 1, color);
-    StickCP2.Display.drawLine(x + 5, y + 1, x + 6, y, color);
-    StickCP2.Display.drawLine(x + 4, y + 4, x + 5, y + 7, color);
-    StickCP2.Display.drawLine(x + 5, y + 7, x + 6, y + 8, color);
-}
-
-void drawFilterIcon(int x, int y, uint16_t color) {
-    StickCP2.Display.drawLine(x, y, x + 10, y, color);
-    StickCP2.Display.drawLine(x, y, x + 3, y + 4, color);
-    StickCP2.Display.drawLine(x + 10, y, x + 7, y + 4, color);
-    StickCP2.Display.drawLine(x + 3, y + 4, x + 3, y + 8, color);
-    StickCP2.Display.drawLine(x + 7, y + 4, x + 7, y + 8, color);
-    StickCP2.Display.fillRect(x + 3, y + 8, 5, 2, color);
-}
-
-void drawHeader() {
-    stick_os::statusStripDrawFull();
-    stick_os::statusStripTick("AiPin");
-}
-
-void drawFooter(const char* btnALabel, const char* btnBLabel) {
-    StickCP2.Display.fillRect(0, SCREEN_H - 14, SCREEN_W, 14, StickCP2.Display.color565(20, 20, 60));
-    StickCP2.Display.setTextSize(1);
-    StickCP2.Display.setTextColor(C_WHITE);
-    StickCP2.Display.setCursor(6, SCREEN_H - 11);
-    StickCP2.Display.printf("A:%s", btnALabel);
-    StickCP2.Display.setCursor(75, SCREEN_H - 11);
-    StickCP2.Display.printf("B:%s", btnBLabel);
-}
-
-// ==========================================
-//        SERVER CONNECTION
-// ==========================================
-bool connectToServer() {
-    String url = String("ws://") + kStickServerHost + ":" + String(kStickServerPort) + "/services/aipin";
-    char apiKey[65];
-    if (stick_os::getApiKey(apiKey, sizeof(apiKey))) {
-        url += "?key=" + String(apiKey);
-    }
-    Serial.printf("[AiPin] Connecting to %s\n", url.c_str());
-    bool ok = wsClient.connect(url.c_str());
-    if (ok) Serial.println("[AiPin] WebSocket connected");
-    else    Serial.println("[AiPin] WebSocket failed");
-    return ok;
-}
-
-// ==========================================
-//        DISCONNECTED SCREEN
-// ==========================================
-void drawLargeWiFiIcon(int cx, int cy, uint16_t color) {
-    StickCP2.Display.drawArc(cx, cy, 24, 21, 220, 320, color);
-    StickCP2.Display.drawArc(cx, cy, 17, 14, 220, 320, color);
-    StickCP2.Display.drawArc(cx, cy, 10, 8, 220, 320, color);
-    StickCP2.Display.fillCircle(cx, cy, 3, color);
 }
 
 void drawLargeServerIcon(int cx, int cy, uint16_t color) {
@@ -196,6 +131,26 @@ void drawSlash(int cx, int cy, int size, uint16_t color) {
     }
 }
 
+// ==========================================
+//        SERVER CONNECTION
+// ==========================================
+bool connectToServer() {
+    const char* proto = (kStickServerPort == 443) ? "wss://" : "ws://";
+    String url = String(proto) + kStickServerHost + ":" + String(kStickServerPort) + "/services/aipin";
+    char apiKey[65];
+    if (stick_os::getApiKey(apiKey, sizeof(apiKey))) {
+        url += "?key=" + String(apiKey);
+    }
+    Serial.printf("[Scribe] Connecting to %s\n", url.c_str());
+    bool ok = wsClient.connect(url.c_str());
+    if (ok) Serial.println("[Scribe] WebSocket connected");
+    else    Serial.println("[Scribe] WebSocket failed");
+    return ok;
+}
+
+// ==========================================
+//        DISCONNECTED SCREEN
+// ==========================================
 void drawAvailableNetworks() {
     constexpr size_t kMaxScan = 8;
     StickNet::ScanResult results[kMaxScan];
@@ -243,31 +198,24 @@ void drawAvailableNetworks() {
 }
 
 void drawDisconnectedScreen(int reason) {
-    StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader();
-
+    clearContent();
     int cx = SCREEN_W / 2;
 
     if (reason == DISC_WIFI) {
-        // Compact header for WiFi disconnected
         StickCP2.Display.setTextSize(1);
         StickCP2.Display.setTextColor(C_RED);
         StickCP2.Display.setCursor(6, 24);
         StickCP2.Display.print("WiFi Disconnected");
 
-        // Draw small WiFi icon with slash
         drawWiFiIcon(SCREEN_W - 20, 20, C_GRAY);
         StickCP2.Display.drawLine(SCREEN_W - 20, 32, SCREEN_W - 8, 20, C_RED);
 
-        // Scanning indicator
         StickCP2.Display.setTextColor(C_DARKGRAY);
         StickCP2.Display.setCursor(6, 44);
         StickCP2.Display.print("Scanning...");
 
-        // Draw available networks
-        StickCP2.Display.setCursor(6, 64);
         drawAvailableNetworks();
-        
+
     } else if (reason == DISC_SERVER) {
         drawWiFiIcon(cx - 6, 56, C_GREEN);
 
@@ -288,17 +236,13 @@ void drawDisconnectedScreen(int reason) {
         StickCP2.Display.setCursor(cx - 36, 96);
         StickCP2.Display.print("Disconnected");
     }
-
-    drawFooter("---", "---");
 }
 
 // ==========================================
 //        CONNECTED SCREEN
 // ==========================================
 void drawConnectedScreen() {
-    StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader();
-
+    clearContent();
     int cx = SCREEN_W / 2;
 
     // Green circle with checkmark
@@ -325,13 +269,11 @@ void drawConnectedScreen() {
     if (ssid.length() > 20) ssid = ssid.substring(0, 18) + "..";
     int nameW = ssid.length() * 6;
     StickCP2.Display.setTextColor(C_DARKGRAY);
-    StickCP2.Display.setCursor(cx - nameW / 2, 136);
+    StickCP2.Display.setCursor(cx - nameW / 2, 140);
     StickCP2.Display.print(ssid.c_str());
 
     // Signal bars
-    drawWiFiBars(cx - 6, 152, StickNet::rssi());
-
-    drawFooter("Rec", "Disc");
+    drawWiFiBars(cx - 6, 156, StickNet::rssi());
 }
 
 // ==========================================
@@ -380,7 +322,7 @@ void sendStreamHeader() {
     uint16_t bitDepth   = AUDIO_BIT_DEPTH;
     uint16_t channels   = AUDIO_CHANNELS;
 
-    Serial.printf("[AiPin] Sending APST header (connected=%d)\n", wsClient.available());
+    Serial.printf("[Scribe] Sending APST header (connected=%d)\n", wsClient.available());
 
     // Pack into a single 12-byte message (server expects one receive)
     uint8_t header[12];
@@ -390,7 +332,7 @@ void sendStreamHeader() {
     memcpy(header + 10, &channels, 2);
     wsClient.sendBinary((const char*)header, 12);
 
-    Serial.println("[AiPin] Header sent");
+    Serial.println("[Scribe] Header sent");
 }
 
 void sendStreamStop() {
@@ -429,9 +371,7 @@ void drawWaveform() {
 }
 
 void drawRecordingScreen() {
-    StickCP2.Display.fillScreen(C_BLACK);
-    drawHeader();
-
+    clearContent();
     int cx = SCREEN_W / 2;
 
     // Duration timer
@@ -442,8 +382,6 @@ void drawRecordingScreen() {
 
     // Initial flat waveform
     drawWaveform();
-
-    drawFooter("Stop", "Disc");
 }
 
 void updateRecordingDisplay() {
@@ -554,7 +492,7 @@ void captureAndStreamChunk() {
         // Debug logging
         chunkCount++;
         if (millis() - lastChunkLog > 2000) {
-            Serial.printf("[AiPin] chunks=%d last_write=%s\n",
+            Serial.printf("[Scribe] chunks=%d last_write=%s\n",
                           chunkCount, written ? "ok" : "fail");
             lastChunkLog = millis();
         }
@@ -591,7 +529,7 @@ void disconnectDevice() {
 //              SETUP
 // ==========================================
 void init() {
-    Serial.println("\n[AiPin] Booting (WiFi mode)...");
+    Serial.println("\n[Scribe] Booting...");
 
     StickCP2.Speaker.begin();
     StickCP2.Speaker.setVolume(120);
@@ -605,22 +543,14 @@ void init() {
     digitalWrite(LED_PIN, LOW);
 
     StickCP2.Display.fillScreen(C_BLACK);
+    stick_os::statusStripDrawFull();
 
-    // Wait for the shared background bring-up kicked off by stick.ino.
-    // If we were flashed standalone (no stick wrapper), startAsync() was
-    // never called — waitForReady() returns instantly and we fall through
-    // to a direct connect. No splash text: the launcher already showed
-    // WiFi/NTP status while the user was picking an app.
     StickNet::waitForReady();
     isWiFiConnected = StickNet::isWiFiReady();
     if (!isWiFiConnected) isWiFiConnected = StickNet::connectWiFi();
 
     if (isWiFiConnected) {
-        StickNet::syncNTP();  // idempotent — no-op if already synced
-
-        // connectToServer() is a blocking TCP connect that can take ~1s.
-        // Show the disconnected/server screen immediately so the user
-        // sees the UI instead of a blank frame during the dial.
+        StickNet::syncNTP();
         drawDisconnectedScreen(DISC_SERVER);
         isServerConnected = connectToServer();
 
@@ -649,10 +579,10 @@ void tick() {
             if (isRecording) {
                 stopRecording();
             }
-            Serial.println("[AiPin] WiFi connection lost");
+            Serial.println("[Scribe] WiFi connection lost");
             drawDisconnectedScreen(DISC_WIFI);
         }
-        
+
         // Try to reconnect periodically
         static unsigned long lastWiFiRetry = 0;
         if (millis() - lastWiFiRetry > 10000) {
@@ -667,7 +597,7 @@ void tick() {
         }
         return;
     }
-    
+
     isWiFiConnected = true;
 
     // Check server connection
@@ -677,10 +607,10 @@ void tick() {
             if (isRecording) {
                 stopRecording();
             }
-            Serial.println("[AiPin] Server connection lost");
+            Serial.println("[Scribe] Server connection lost");
             drawDisconnectedScreen(DISC_SERVER);
         }
-        
+
         // Try to reconnect periodically
         static unsigned long lastServerRetry = 0;
         if (millis() - lastServerRetry > 5000) {
@@ -692,7 +622,7 @@ void tick() {
         }
         return;
     }
-    
+
     isServerConnected = true;
 
     // Handle connected state
@@ -725,19 +655,12 @@ void tick() {
         if (StickCP2.BtnB.wasPressed()) {
             disconnectDevice();
         }
-
-        // Update header time every minute when on connected screen
-        static unsigned long lastTimeUpdate = 0;
-        if (millis() - lastTimeUpdate >= 60000) {
-            drawHeader();
-            lastTimeUpdate = millis();
-        }
     }
 
     // Periodic heartbeat for debug
     static unsigned long lastHeartbeat = 0;
     if (millis() - lastHeartbeat > 5000) {
-        Serial.printf("[AiPin] heartbeat: wifi=%d server=%d rec=%d rssi=%d\n",
+        Serial.printf("[Scribe] heartbeat: wifi=%d server=%d rec=%d rssi=%d\n",
                       isWiFiConnected, isServerConnected, isRecording, StickNet::rssi());
         lastHeartbeat = millis();
     }
@@ -763,8 +686,8 @@ void icon(int x, int y, uint16_t color) {
 #include <stick_os.h>
 
 static const stick_os::AppDescriptor kAipinDescriptor = {
-    /*id=*/       "aipin",
-    /*name=*/     "AiPin",
+    /*id=*/       "scribe",
+    /*name=*/     "Scribe",
     /*version=*/  "1.0.0",
     /*category=*/ stick_os::CAT_UTILITY,
     /*flags=*/    stick_os::APP_NEEDS_NET | stick_os::APP_NEEDS_MIC,

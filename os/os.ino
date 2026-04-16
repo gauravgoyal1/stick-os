@@ -420,6 +420,14 @@ void loop() {
             g_runningApp = nullptr;
             enterAppList(g_openCategory);
         }
+        // Update status strip for portrait-mode apps (games use landscape)
+        if (g_runningApp && StickCP2.Display.getRotation() == 0) {
+            const uint32_t now = millis();
+            if (now - g_lastStripTick > 500) {
+                stick_os::statusStripTick(g_runningApp->name);
+                g_lastStripTick = now;
+            }
+        }
         return;
     }
 
