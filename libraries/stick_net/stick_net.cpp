@@ -5,7 +5,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 
-#include <stick_config.h>
+#include <stick_store.h>
 #include "stick_net.h"
 
 namespace StickNet {
@@ -21,34 +21,82 @@ SemaphoreHandle_t g_mutex   = nullptr;
 bool connectWiFiLocked() {
     WiFi.mode(WIFI_STA);
 
-    int n = WiFi.scanNetworks();
-    if (n <= 0) {
+    // 1. Try last connected network first
+    char lastSSID[33] = {0};
+    if (stick_os::getLastConnectedSSID(lastSSID, sizeof(lastSSID)) && lastSSID[0] != '\0') {
+        // Find password for this SSID in NVS
+        stick_os::WiFiCred creds[stick_os::kMaxWiFiNetworks];
+        size_t n = stick_os::loadWiFiCreds(creds, stick_os::kMaxWiFiNetworks);
+        for (size_t i = 0; i < n; i++) {
+            if (strcmp(creds[i].ssid, lastSSID) == 0) {
+                Serial.printf("[StickNet] trying last: %s\n", lastSSID);
+                WiFi.begin(lastSSID, creds[i].pass);
+                int attempts = 0;
+                while (WiFi.status() != WL_CONNECTED && attempts < 15) {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    attempts++;
+                }
+                if (WiFi.status() == WL_CONNECTED) {
+                    Serial.printf("[StickNet] connected to %s\n", lastSSID);
+                    return true;
+                }
+                break;
+            }
+        }
+    }
+
+    // 2. Scan and try known NVS networks
+    int scanCount = WiFi.scanNetworks();
+    if (scanCount <= 0) {
         Serial.println("[StickNet] no networks visible");
         return false;
     }
-    Serial.printf("[StickNet] %d networks visible\n", n);
 
-    for (int i = 0; i < n; i++) {
+    stick_os::WiFiCred creds[stick_os::kMaxWiFiNetworks];
+    size_t credCount = stick_os::loadWiFiCreds(creds, stick_os::kMaxWiFiNetworks);
+
+    for (int i = 0; i < scanCount; i++) {
         String found = WiFi.SSID(i);
-        for (size_t j = 0; j < kWiFiNetworkCount; j++) {
-            if (found != kWiFiNetworks[j].ssid) continue;
-
-            Serial.printf("[StickNet] connecting to %s\n", kWiFiNetworks[j].ssid);
-            WiFi.begin(kWiFiNetworks[j].ssid, kWiFiNetworks[j].password);
-
+        for (size_t j = 0; j < credCount; j++) {
+            if (found != creds[j].ssid) continue;
+            Serial.printf("[StickNet] trying known: %s\n", creds[j].ssid);
+            WiFi.begin(creds[j].ssid, creds[j].pass);
             int attempts = 0;
-            while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+            while (WiFi.status() != WL_CONNECTED && attempts < 15) {
                 vTaskDelay(pdMS_TO_TICKS(500));
                 attempts++;
             }
             if (WiFi.status() == WL_CONNECTED) {
-                Serial.printf("[StickNet] connected, ip=%s\n",
-                              WiFi.localIP().toString().c_str());
+                stick_os::setLastConnectedSSID(creds[j].ssid);
+                Serial.printf("[StickNet] connected to %s\n", creds[j].ssid);
+                WiFi.scanDelete();
                 return true;
             }
-            Serial.println("[StickNet] connect failed, trying next");
         }
     }
+
+    // 3. Try any open network
+    for (int i = 0; i < scanCount; i++) {
+        if (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) {
+            String openSSID = WiFi.SSID(i);
+            Serial.printf("[StickNet] trying open: %s\n", openSSID.c_str());
+            WiFi.begin(openSSID.c_str());
+            int attempts = 0;
+            while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                attempts++;
+            }
+            if (WiFi.status() == WL_CONNECTED) {
+                stick_os::setLastConnectedSSID(openSSID.c_str());
+                Serial.printf("[StickNet] connected to open: %s\n", openSSID.c_str());
+                WiFi.scanDelete();
+                return true;
+            }
+        }
+    }
+
+    WiFi.scanDelete();
+    Serial.println("[StickNet] all networks failed");
     return false;
 }
 
@@ -173,9 +221,11 @@ size_t scanNetworks(ScanResult* out, size_t maxResults) {
         r.ssid[sizeof(r.ssid) - 1] = '\0';
         r.rssi    = static_cast<int8_t>(WiFi.RSSI(i));
         r.channel = static_cast<uint8_t>(WiFi.channel(i));
-        r.known   = false;
-        for (size_t j = 0; j < kWiFiNetworkCount; j++) {
-            if (foundSsid == kWiFiNetworks[j].ssid) { r.known = true; break; }
+        stick_os::WiFiCred nvsCreds[stick_os::kMaxWiFiNetworks];
+        size_t nvsCount = stick_os::loadWiFiCreds(nvsCreds, stick_os::kMaxWiFiNetworks);
+        r.known = false;
+        for (size_t j = 0; j < nvsCount; j++) {
+            if (foundSsid == nvsCreds[j].ssid) { r.known = true; break; }
         }
     }
     WiFi.scanDelete();

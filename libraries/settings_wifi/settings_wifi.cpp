@@ -1,7 +1,6 @@
 #include <M5StickCPlus2.h>
 #include <stick_os.h>
 #include <stick_net.h>
-#include <stick_config.h>
 #include "settings_wifi.h"
 
 namespace SettingsWiFi {
@@ -56,13 +55,15 @@ void drawScreen() {
         y += 16;
     }
 
-    // Known networks
+    // Known networks (from NVS)
+    stick_os::WiFiCred nvsCreds[stick_os::kMaxWiFiNetworks];
+    size_t nvsCount = stick_os::loadWiFiCreds(nvsCreds, stick_os::kMaxWiFiNetworks);
     d.setTextColor(dim, BLACK);
-    d.setCursor(8, y); d.printf("Known networks (%u)", (unsigned)kWiFiNetworkCount);
+    d.setCursor(8, y); d.printf("Known networks (%u)", (unsigned)nvsCount);
     y += 12;
-    for (size_t i = 0; i < kWiFiNetworkCount && i < 4; i++) {
+    for (size_t i = 0; i < nvsCount && i < 4; i++) {
         d.setTextColor(gray, BLACK);
-        d.setCursor(12, y); d.print(kWiFiNetworks[i].ssid);
+        d.setCursor(12, y); d.print(nvsCreds[i].ssid);
         y += 12;
     }
 
