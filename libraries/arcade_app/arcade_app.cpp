@@ -995,4 +995,4 @@ static const stick_os::AppDescriptor kArcadeDescriptor = {
     /*native=*/   { &ArcadeApp::init, &ArcadeApp::tick, nullptr, nullptr },
     /*script=*/   { nullptr, nullptr },
 };
-STICK_REGISTER_APP(kArcadeDescriptor);
+// STICK_REGISTER_APP(kArcadeDescriptor);  // Neutralized: per-game libraries now register

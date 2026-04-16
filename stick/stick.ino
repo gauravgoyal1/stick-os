@@ -8,6 +8,20 @@
 #include <stick_net.h>
 #include <stick_os.h>
 
+// App library includes — arduino-cli compiles libraries only when their
+// headers appear in the sketch's include tree. These includes exist
+// solely to trigger that discovery; the launcher uses the stick_os
+// registry at runtime, not these headers directly.
+#include <arcade_common.h>
+#include <game_flappy.h>
+#include <game_dino.h>
+#include <game_scream.h>
+#include <game_galaxy.h>
+#include <game_balance.h>
+#include <game_simon.h>
+#include <game_panic.h>
+#include <aipin_wifi_app.h>
+
 namespace {
 
 using stick_os::AppCategory;
@@ -139,11 +153,11 @@ void drawAppList() {
     }
 
     // Scrollable app entries
-    const int rowH = 48;
+    const int rowH = 38;
     const int firstRowY = sy + 4;
-    const int maxVisible = 4;
+    const int maxVisible = 5;
 
-    int start = static_cast<int>(g_appCursor) - 1;
+    int start = static_cast<int>(g_appCursor) - 2;
     if (start < 0) start = 0;
     if (start > static_cast<int>(n) - maxVisible) start = static_cast<int>(n) - maxVisible;
     if (start < 0) start = 0;
@@ -161,19 +175,13 @@ void drawAppList() {
         if (sel) d.fillRoundRect(5, y + 1, d.width() - 10, rowH - 6, 4, bg);
 
         // Icon
-        if (app->icon) app->icon(12, y + 6, fg);
+        if (app->icon) app->icon(10, y + 3, fg);
 
-        // Name
+        // Name — shifted left, fits 7 chars at textSize 2
         d.setTextSize(2);
         d.setTextColor(sel ? WHITE : fg, bg);
-        d.setCursor(52, y + 8);
+        d.setCursor(46, y + 10);
         d.print(app->name);
-
-        // Version
-        d.setTextSize(1);
-        d.setTextColor(d.color565(80, 80, 80), bg);
-        d.setCursor(52, y + 28);
-        d.printf("v%s", app->version);
     }
 
     // Scroll indicator
