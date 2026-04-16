@@ -12,14 +12,16 @@ void processSerialCommand() {
     if (line.length() == 0) return;
 
     if (line.startsWith("WIFI_SET ")) {
+        // Format: WIFI_SET <ssid>\t<password>
+        // Tab delimiter lets SSIDs and passwords contain spaces.
         String rest = line.substring(9);
-        int space = rest.indexOf(' ');
-        if (space < 0) {
-            Serial.println("ERR: usage WIFI_SET ssid password");
+        int tab = rest.indexOf('\t');
+        if (tab < 0) {
+            Serial.println("ERR: usage WIFI_SET ssid<TAB>password");
             return;
         }
-        String ssid = rest.substring(0, space);
-        String pass = rest.substring(space + 1);
+        String ssid = rest.substring(0, tab);
+        String pass = rest.substring(tab + 1);
         if (stick_os::saveWiFiCred(ssid.c_str(), pass.c_str())) {
             Serial.printf("OK: saved \"%s\"\n", ssid.c_str());
         } else {

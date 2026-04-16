@@ -37,7 +37,8 @@ def main():
         s.reset_input_buffer()
 
         if args.cmd == "add":
-            s.write(f"WIFI_SET {args.ssid} {args.password}\n".encode())
+            # Tab delimiter so SSIDs and passwords may contain spaces.
+            s.write(f"WIFI_SET {args.ssid}\t{args.password}\n".encode())
         elif args.cmd == "list":
             s.write(b"WIFI_LIST\n")
         elif args.cmd == "delete":
@@ -49,7 +50,7 @@ def main():
 
         time.sleep(0.5)
         while s.in_waiting:
-            print(s.readline().decode().strip())
+            print(s.readline().decode(errors="replace").strip())
 
 
 if __name__ == "__main__":
