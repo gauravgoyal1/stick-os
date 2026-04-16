@@ -44,7 +44,7 @@ uint32_t       g_lastStripTick = 0;
 stick_os::StickStore g_osStore("stick");
 
 const char* const kCategoryNames[stick_os::CAT_COUNT] = {
-    "Games", "Utilities", "Sensors", "Settings",
+    "Games", "Apps", "Sensors", "Settings",
 };
 
 const uint16_t kCategoryColors[stick_os::CAT_COUNT] = {
