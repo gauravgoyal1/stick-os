@@ -80,7 +80,32 @@ void enterAppList(stick_os::AppCategory cat) {
 }
 
 void enterApp(const stick_os::AppDescriptor* app) {
-    if (app == nullptr || app->runtime != stick_os::RUNTIME_NATIVE) return;
+    if (app == nullptr) return;
+    if (app->runtime != stick_os::RUNTIME_NATIVE) {
+        // Phase 2: scripted runtimes not yet supported — show a message
+        // instead of silently returning.
+        auto& d = StickCP2.Display;
+        setPortrait();
+        d.fillRect(0, stick_os::kStatusStripHeight, d.width(),
+                   d.height() - stick_os::kStatusStripHeight, BLACK);
+        d.setTextSize(1);
+        d.setTextColor(YELLOW, BLACK);
+        d.setCursor(10, 80);
+        d.print("Scripted apps");
+        d.setCursor(10, 96);
+        d.print("not yet supported");
+        d.setTextColor(d.color565(80, 80, 80), BLACK);
+        d.setCursor(10, 120);
+        d.print("PWR: back");
+        while (true) {
+            StickCP2.update();
+            if (M5.BtnPWR.wasClicked()) break;
+            delay(50);
+        }
+        g_btnDrainFrames = 6;
+        drawAppList();
+        return;
+    }
     if (app->native.init == nullptr) return;
     Serial.printf("[stick] launching %s\n", app->name);
     g_runningApp = app;

@@ -34,6 +34,18 @@ const AppDescriptor* appAtInCategory(AppCategory category, size_t i);
 // Find an app by its `id` string. nullptr if not found.
 const AppDescriptor* findAppById(const char* id);
 
+// ---------- Phase 2: dynamic registration ----------
+
+// Register an app at runtime (e.g. scripted apps discovered on LittleFS).
+// The descriptor must remain valid for the lifetime of the registration —
+// callers typically heap-allocate it. Returns false if the registry is full
+// or the id is already registered.
+bool registerApp(const AppDescriptor* d);
+
+// Unregister a dynamically-registered app by id. Returns true if found and
+// removed. Compile-time (STICK_REGISTER_APP) entries cannot be removed.
+bool unregisterApp(const char* id);
+
 }  // namespace stick_os
 
 // Place this in any app library's .cpp to register the app at boot.

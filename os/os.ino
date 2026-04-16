@@ -79,6 +79,7 @@ void setup() {
         }
     }
 
+    stick_os::fsInit();
     stick_os::statusStripInit();
 
     launcher::enterCategories();

@@ -7,5 +7,6 @@
 #include "app_registry.h"
 #include "app_context.h"
 #include "stick_store.h"
+#include "stick_fs.h"
 #include "status_strip.h"
 #include "wifi_picker.h"

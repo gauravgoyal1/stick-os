@@ -47,6 +47,15 @@ void init() {
     drawBar(8, y, d.width() - 16, 20, heapUsed, heapTotal, GREEN, "RAM (heap)");
     y += 50;
 
+    // LittleFS (app storage)
+    if (stick_os::fsReady()) {
+        uint32_t fsUsed  = stick_os::fsUsedBytes();
+        uint32_t fsTotal = stick_os::fsTotalBytes();
+        drawBar(8, y, d.width() - 16, 20, fsUsed, fsTotal,
+                d.color565(200, 100, 255), "Apps (LittleFS)");
+        y += 50;
+    }
+
     // Summary
     d.setTextSize(1);
     d.setTextColor(d.color565(80, 80, 80), BLACK);
@@ -55,9 +64,6 @@ void init() {
     y += 14;
     d.setCursor(8, y);
     d.printf("Flash total: %lu MB", (unsigned long)(flashTotal / (1024 * 1024)));
-    y += 14;
-    d.setCursor(8, y);
-    d.printf("PSRAM: %lu KB free", (unsigned long)(ESP.getFreePsram() / 1024));
 
     // Footer
     d.setTextColor(d.color565(80, 80, 80), BLACK);
