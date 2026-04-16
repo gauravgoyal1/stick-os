@@ -34,4 +34,8 @@ bool checkAppExit();
 bool wasExitRequested();
 void clearExitRequest();
 
+// Logs free heap to serial with a tag. Called by the OS on app
+// enter/exit for memory-leak diagnostics.
+void logHeap(const char* tag);
+
 }  // namespace stick_os

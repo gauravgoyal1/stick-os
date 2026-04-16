@@ -23,6 +23,7 @@
 #include <aipin_wifi_app.h>
 #include <settings_about.h>
 #include <sensor_battery.h>
+#include <sensor_wifi_scan.h>
 
 namespace {
 
