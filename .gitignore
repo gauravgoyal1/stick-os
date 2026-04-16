@@ -1,37 +1,36 @@
-# Arduino build artifacts
+# Build artifacts
 build/
 *.elf
 *.bin
-*.hex
-*.map
 
-# OS files
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
 .DS_Store
-Thumbs.db
+
+# Server runtime data
+server/storage/apps/
+server/storage/firmware/
+server/storage/recordings/
+server/storage/transcripts/
+server/storage/wifi.json
+
+# Environment and secrets
+.env
+libraries/stick_config/stick_config.h
+
+# MicroPython build dependencies
+third_party/
+
+# Superpowers working docs
+**/superpowers/
+
+# Session state
+.remember/
 
 # Python
 venv/
 __pycache__/
 *.pyc
-
-# Output directories
-recordings/
-transcripts/
-
-# Secrets
-.env
-
-# IDE files
-*.swp
-*.swo
-*~
-
-# Claude files
-.claude/
-.remember/
-
-# Superpowers workspace (specs, plans, audits — all session-scoped, not shared)
-**/superpowers/
-
-# Machine-specific configs (server endpoints, WiFi stubs) — templates are tracked as .example
-libraries/stick_config/stick_config.h
