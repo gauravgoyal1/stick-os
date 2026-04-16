@@ -49,15 +49,12 @@ void init() {
         for (int i = start; i < (int)total && i < start + maxRows; i++) {
             const stick_os::AppDescriptor* app = stick_os::appAt(i);
             if (!app) continue;
-            d.setTextColor(catColors[app->category], BLACK);
-            d.setCursor(4, py);
-            d.printf("%-7s", catLabel(app->category));
+            // Color dot for category
+            d.fillCircle(8, py + 3, 3, catColors[app->category]);
+            // App name
             d.setTextColor(d.color565(140, 140, 140), BLACK);
-            d.setCursor(48, py);
+            d.setCursor(16, py);
             d.print(app->name);
-            d.setTextColor(d.color565(60, 60, 60), BLACK);
-            d.setCursor(108, py);
-            d.printf("v%s", app->version);
             py += rowH;
         }
         int totalPages = (total + maxRows - 1) / maxRows;

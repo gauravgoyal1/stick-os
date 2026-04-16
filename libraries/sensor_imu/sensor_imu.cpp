@@ -76,6 +76,7 @@ void init() {
         StickCP2.update();
         if (stick_os::checkAppExit()) return;
 
+        StickCP2.Imu.update();
         auto imu = StickCP2.Imu.getImuData();
         drawBubble(imu.accel.x, imu.accel.y);
         drawValues(imu.accel.x, imu.accel.y, imu.accel.z,
