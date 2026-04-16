@@ -69,8 +69,11 @@ void statusStripTick(const char* appName) {
         g_dirty          = false;
     }
 
-    // Left: app name or blank.
-    d.fillRect(0, 0, 120, kStatusStripHeight - 1, BLACK);
+    // Layout (left to right): label | gap | WiFi bars | battery% | time
+    const int w = d.width();
+
+    // Left: label.
+    d.fillRect(0, 0, 42, kStatusStripHeight - 1, BLACK);
     if (appName != nullptr) {
         d.setTextSize(1);
         d.setTextColor(d.color565(180, 180, 180), BLACK);
@@ -78,55 +81,70 @@ void statusStripTick(const char* appName) {
         d.print(appName);
     }
 
-    // Right: status block. Layout from right-to-left: bars, clock, battery%.
-    const int w = d.width();
-
-    // WiFi bars.
+    // WiFi bars — after the label gap.
     const bool connected = StickNet::isConnected();
     const int  bars      = barsFromRssi(StickNet::rssi(), connected);
+    const int  wifiX     = w - 80;
     if (bars != g_lastRssiBars || connected != g_lastConnected) {
-        d.fillRect(w - 16, 4, 14, 10, BLACK);
-        drawBars(w - 16, 4, bars);
+        d.fillRect(wifiX, 4, 14, 10, BLACK);
+        drawBars(wifiX, 4, bars);
         g_lastRssiBars  = bars;
         g_lastConnected = connected;
     }
 
-    // Clock / stage.
+    // Battery icon — after WiFi bars.
+    const int battX = w - 58;
+    int pct = StickCP2.Power.getBatteryLevel();
+    bool charging = StickCP2.Power.isCharging();
+    if (pct != g_lastBatteryPct || g_dirty) {
+        d.fillRect(battX, 3, 18, 12, BLACK);
+        // Battery outline: body + nub
+        d.drawRect(battX, 4, 14, 9, d.color565(100, 100, 100));
+        d.fillRect(battX + 14, 6, 2, 5, d.color565(100, 100, 100));
+        // Fill level (1-12 px wide, inside the body)
+        int fillW = (pct * 12) / 100;
+        if (fillW < 1 && pct > 0) fillW = 1;
+        uint16_t fillColor;
+        if (charging)       fillColor = d.color565(100, 200, 255);  // light blue
+        else if (pct > 50)  fillColor = GREEN;
+        else if (pct > 20)  fillColor = YELLOW;
+        else                fillColor = RED;
+        if (fillW > 0) d.fillRect(battX + 1, 5, fillW, 7, fillColor);
+        // Charging bolt overlay
+        if (charging) {
+            d.drawLine(battX + 8, 5, battX + 5, 8, WHITE);
+            d.drawLine(battX + 5, 8, battX + 9, 8, WHITE);
+            d.drawLine(battX + 9, 8, battX + 6, 11, WHITE);
+        }
+        g_lastBatteryPct = pct;
+    }
+
+    // Time / stage — rightmost.
+    const int timeX = w - 32;
     const StickNet::Stage stage = StickNet::status();
     if (stage == StickNet::STAGE_READY) {
         auto dt = StickCP2.Rtc.getDateTime();
         int minute = dt.time.minutes;
         if (minute != g_lastMinute || stage != g_lastStage) {
-            d.fillRect(w - 60, 5, 40, 8, BLACK);
+            d.fillRect(timeX, 5, 30, 8, BLACK);
             d.setTextSize(1);
             d.setTextColor(GREEN, BLACK);
-            d.setCursor(w - 58, 5);
+            d.setCursor(timeX + 2, 5);
             d.printf("%02d:%02d", dt.time.hours, minute);
             g_lastMinute = minute;
         }
     } else if (stage != g_lastStage) {
-        d.fillRect(w - 60, 5, 40, 8, BLACK);
+        d.fillRect(timeX, 5, 30, 8, BLACK);
         d.setTextSize(1);
-        d.setCursor(w - 58, 5);
+        d.setCursor(timeX + 2, 5);
         switch (stage) {
-            case StickNet::STAGE_WIFI:   d.setTextColor(YELLOW, BLACK); d.print("WiFi."); break;
-            case StickNet::STAGE_NTP:    d.setTextColor(YELLOW, BLACK); d.print("NTP.");  break;
-            case StickNet::STAGE_FAILED: d.setTextColor(RED, BLACK);    d.print("!net");  break;
+            case StickNet::STAGE_WIFI:   d.setTextColor(YELLOW, BLACK); d.print("WiFi"); break;
+            case StickNet::STAGE_NTP:    d.setTextColor(YELLOW, BLACK); d.print("NTP");  break;
+            case StickNet::STAGE_FAILED: d.setTextColor(RED, BLACK);    d.print("!net"); break;
             default:                     break;
         }
     }
     g_lastStage = stage;
-
-    // Battery percent.
-    int pct = StickCP2.Power.getBatteryLevel();
-    if (pct != g_lastBatteryPct) {
-        d.fillRect(w - 90, 5, 28, 8, BLACK);
-        d.setTextSize(1);
-        d.setTextColor(pct < 20 ? RED : d.color565(180, 180, 180), BLACK);
-        d.setCursor(w - 88, 5);
-        d.printf("%d%%", pct);
-        g_lastBatteryPct = pct;
-    }
 }
 
 }  // namespace stick_os
