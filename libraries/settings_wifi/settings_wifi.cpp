@@ -1,4 +1,5 @@
 #include <M5StickCPlus2.h>
+#include <WiFi.h>
 #include <stick_os.h>
 #include <stick_net.h>
 #include "settings_wifi.h"
@@ -7,6 +8,7 @@ namespace SettingsWiFi {
 
 void drawScreen() {
     auto& d = StickCP2.Display;
+    d.setRotation(0);
     d.fillScreen(BLACK);
 
     int y = 8;
@@ -41,7 +43,7 @@ void drawScreen() {
         d.setCursor(8, y); d.print(StickNet::ssid());
         y += 16;
 
-        // RSSI
+        // Signal
         d.setTextColor(dim, BLACK);
         d.setCursor(8, y); d.print("Signal");
         y += 12;
@@ -49,28 +51,24 @@ void drawScreen() {
         d.setTextColor(rssi > -60 ? GREEN : rssi > -75 ? YELLOW : RED, BLACK);
         d.setCursor(8, y); d.printf("%d dBm", rssi);
         y += 16;
+
+        // IP
+        d.setTextColor(dim, BLACK);
+        d.setCursor(8, y); d.print("IP");
+        y += 12;
+        d.setTextColor(gray, BLACK);
+        d.setCursor(8, y); d.print(WiFi.localIP().toString().c_str());
+        y += 16;
     } else {
         d.setTextColor(RED, BLACK);
         d.setCursor(8, y); d.print("Not connected");
         y += 16;
     }
 
-    // Known networks (from NVS)
-    stick_os::WiFiCred nvsCreds[stick_os::kMaxWiFiNetworks];
-    size_t nvsCount = stick_os::loadWiFiCreds(nvsCreds, stick_os::kMaxWiFiNetworks);
-    d.setTextColor(dim, BLACK);
-    d.setCursor(8, y); d.printf("Known networks (%u)", (unsigned)nvsCount);
-    y += 12;
-    for (size_t i = 0; i < nvsCount && i < 4; i++) {
-        d.setTextColor(gray, BLACK);
-        d.setCursor(12, y); d.print(nvsCreds[i].ssid);
-        y += 12;
-    }
-
     // Footer
     d.setTextColor(dim, BLACK);
     d.setCursor(8, d.height() - 12);
-    d.print("A:reconnect  PWR:back");
+    d.print("A:switch  PWR:back");
 }
 
 void init() {
@@ -82,12 +80,11 @@ void init() {
         if (stick_os::checkAppExit()) return;
 
         if (StickCP2.BtnA.wasPressed()) {
-            auto& d = StickCP2.Display;
-            d.setTextSize(1);
-            d.setTextColor(YELLOW, BLACK);
-            d.setCursor(8, 100);
-            d.print("Reconnecting...");
-            StickNet::connectWiFi();
+            bool connected = stick_os::showWiFiPicker();
+            if (connected) {
+                StickNet::syncNTP();
+            }
+            StickCP2.Display.setRotation(0);
             drawScreen();
         }
 
