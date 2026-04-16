@@ -56,4 +56,9 @@ bool saveHighScoreIfBetter(const char* gameId, uint32_t score) {
     return true;
 }
 
+bool updateAndCheckExit() {
+    StickCP2.update();
+    return stick_os::checkAppExit();
+}
+
 }  // namespace ArcadeCommon

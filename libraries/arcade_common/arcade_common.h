@@ -25,4 +25,9 @@ int getNoiseLevel();
 uint32_t loadHighScore(const char* gameId);
 bool     saveHighScoreIfBetter(const char* gameId, uint32_t score);
 
+// Call this instead of StickCP2.update() inside game loops. Updates
+// button state AND checks if the user pressed PWR to exit. Returns
+// true if the game should immediately return from init().
+bool updateAndCheckExit();
+
 }  // namespace ArcadeCommon

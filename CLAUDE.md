@@ -9,10 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current sub-projects
 
 - **`aipin/`** — AiPin audio streamer sub-project. Two firmware variants (`bl/` Bluetooth SPP, `wifi/` WiFi+TCP) plus a Python host-side server under `server/`. The WiFi variant's implementation lives in `libraries/aipin_wifi_app/`; `aipin/wifi/wifi.ino` is a thin wrapper for solo flashing. The canonical production target is `stick/`. See `aipin/CLAUDE.md` for architecture and build notes.
-- **`arcade/`** — Multi-game arcade sketch for the M5StickC Plus 2 (flappy, dino, scream, galaxy, balance, simon). The implementation lives in `libraries/arcade_app/`; `arcade/arcade.ino` is a thin wrapper so `./tools/flash.sh arcade` still flashes the game standalone for solo debugging. The canonical production target is `stick/`.
+- **Game libraries** — Seven standalone game apps under `libraries/game_{flappy,dino,scream,galaxy,balance,simon,panic}/`, each registered via `STICK_REGISTER_APP(...)` under the GAMES category. Shared arcade helpers (colors, noise level, high-score persistence via StickStore) live in `libraries/arcade_common/`.
 - **`clap_remote/`** — Clap-activated IR remote for a TCL Mini LED TV. Phase 1 in progress. See `clap_remote/CLAUDE.md` and `clap_remote/docs/superpowers/` for spec, plan, and working notes.
 - **`diagnostics/`** — Project-agnostic hardware test sketches: `hello_world/`, `ir_probe/`, `ir_sweep/`, `wifi_scan/`. Good for first-time peripheral sanity checks or hardware probes that aren't tied to any one project.
-- **`stick/`** — Unified launcher firmware that bundles Arcade and AiPin-WiFi into one binary. Boot shows a home screen with per-app icons and a live WiFi/NTP status strip; BtnA selects, BtnB cycles, a short power-button click inside any app restarts back to the launcher (last selection remembered via `Preferences`). WiFi scan/connect + NTP sync run on a background FreeRTOS task (`libraries/stick_net/`) kicked off before the home screen renders, so the user's browse time doubles as bring-up time. The individual sketches in `arcade/` and `aipin/wifi/` still flash standalone for solo debugging — they fall back to a direct `StickNet::connectWiFi()` if the background task was never started. Production target for the StickC Plus 2.
+- **`stick/`** — The Stick OS launcher. Boots to a two-level home in portrait mode (category picker → app list) driven by a static app registry in `libraries/stick_os/`. Apps register via `STICK_REGISTER_APP(...)`; adding a new native app is a library add under `libraries/` plus an `#include` in `stick.ino` for arduino-cli discovery — no other edits needed. Categories: GAME, UTILITY, SENSOR, SETTINGS. Current apps: seven game libraries under GAMES and AiPin-WiFi under UTILITIES. `stick_os` owns a top status strip (WiFi bars, battery icon, clock) on launcher screens. Short PWR-click exits any running app back to the app list. Last-visited category + last-app-per-category persist across reboots via `StickStore`. WiFi + NTP run on a background FreeRTOS task (`libraries/stick_net/`). Production target for the StickC Plus 2.
 
 ## Shared libraries convention
 
@@ -26,8 +26,7 @@ Uses `arduino-cli` with the M5Stack board package. `tools/flash.sh` is the usual
 
 ```bash
 # Compile + upload in one shot
-./tools/flash.sh stick           # production target: arcade + aipin/wifi launcher
-./tools/flash.sh arcade          # solo arcade
+./tools/flash.sh stick           # production target: OS launcher + all apps
 ./tools/flash.sh aipin/wifi      # solo aipin/wifi
 ./tools/flash.sh aipin/bl
 ./tools/flash.sh clap_remote

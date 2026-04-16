@@ -321,14 +321,19 @@ void loop() {
         }
     }
 
-    // Running app: forward the tick, repaint the status strip periodically.
+    // Running app: forward the tick. Check exit flag after.
     if (g_state == ST_APP) {
         if (g_runningApp && g_runningApp->native.tick) {
             g_runningApp->native.tick();
         }
-        // Don't draw the status strip while an app is running — apps own
-        // their rotation and the landscape strip would stomp on portrait
-        // content (or vice versa). The strip only shows on launcher screens.
+        // If the app's init() or tick() detected a PWR press via
+        // stick_os::checkAppExit(), transition back to the app list.
+        if (stick_os::wasExitRequested()) {
+            stick_os::clearExitRequest();
+            Serial.println("[stick] exit requested -> list");
+            g_runningApp = nullptr;
+            enterAppList(g_openCategory);
+        }
         return;
     }
 

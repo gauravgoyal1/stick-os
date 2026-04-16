@@ -26,4 +26,12 @@ const AppContext& currentContext();
 // Not for app code.
 void _setCurrentContext(const AppContext& ctx);
 
+// App exit mechanism. Games call checkAppExit() in their loops after
+// calling StickCP2.update(). Returns true if the user pressed PWR —
+// the game should immediately return from init(). stick.ino checks
+// wasExitRequested() after init()/tick() returns.
+bool checkAppExit();
+bool wasExitRequested();
+void clearExitRequest();
+
 }  // namespace stick_os

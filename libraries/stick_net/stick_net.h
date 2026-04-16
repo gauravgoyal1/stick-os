@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Shared WiFi + NTP helpers used by both arcade_app and aipin_wifi_app.
+// Shared WiFi + NTP helpers used by app libraries and the stick OS.
 //
 // No display I/O — callers own their own UI. Keep this surface minimal;
 // add new symbols only when a second sketch needs them.
