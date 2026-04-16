@@ -16,4 +16,7 @@ void init();
 // Must return promptly (< ~50ms). No infinite loops.
 void tick();
 
+// Draw a small identifying glyph at (x, y) using the given color.
+void icon(int x, int y, uint16_t color);
+
 }  // namespace ArcadeApp

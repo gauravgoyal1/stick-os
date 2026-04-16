@@ -971,4 +971,28 @@ void tick() {
     delay(20);
 }
 
+void icon(int x, int y, uint16_t color) {
+    auto& d = StickCP2.Display;
+    d.fillRoundRect(x, y + 6, 36, 18, 6, color);
+    d.fillRoundRect(x + 3, y, 10, 6, 2, color);
+    d.fillRoundRect(x + 23, y, 10, 6, 2, color);
+    d.fillCircle(x + 27, y + 14, 2, BLACK);
+    d.fillCircle(x + 31, y + 18, 2, BLACK);
+    d.fillRect(x + 5, y + 13, 9, 3, BLACK);
+    d.fillRect(x + 8, y + 10, 3, 9, BLACK);
+}
+
 }  // namespace ArcadeApp
+
+static const stick_os::AppDescriptor kArcadeDescriptor = {
+    /*id=*/       "arcade",
+    /*name=*/     "Arcade",
+    /*version=*/  "1.0.0",
+    /*category=*/ stick_os::CAT_GAME,
+    /*flags=*/    stick_os::APP_NONE,
+    /*icon=*/     &ArcadeApp::icon,
+    /*runtime=*/  stick_os::RUNTIME_NATIVE,
+    /*native=*/   { &ArcadeApp::init, &ArcadeApp::tick, nullptr, nullptr },
+    /*script=*/   { nullptr, nullptr },
+};
+STICK_REGISTER_APP(kArcadeDescriptor);

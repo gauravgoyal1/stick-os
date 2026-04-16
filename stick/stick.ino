@@ -244,6 +244,11 @@ void setup() {
   Serial.begin(115200);
   delay(50);
   Serial.println("stick booted");
+  Serial.printf("[stick_os] %u apps registered\n", (unsigned)stick_os::appCount());
+  for (size_t i = 0; i < stick_os::appCount(); i++) {
+    auto* d = stick_os::appAt(i);
+    Serial.printf("  [%u] %s (cat=%u)\n", (unsigned)i, d->name, d->category);
+  }
 
   // Kick off WiFi + NTP in the background so the user can browse the
   // home screen while it runs. By the time they pick an app, chances

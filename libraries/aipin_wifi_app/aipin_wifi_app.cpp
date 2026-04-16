@@ -766,4 +766,29 @@ void tick() {
     }
 }
 
+void icon(int x, int y, uint16_t color) {
+    auto& d = StickCP2.Display;
+    d.fillRoundRect(x + 12, y, 12, 18, 6, color);
+    d.drawLine(x + 8,  y + 16, x + 8,  y + 22, color);
+    d.drawArc(x + 18, y + 16, 12, 11, 180, 360, color);
+    d.drawLine(x + 28, y + 16, x + 28, y + 22, color);
+    d.drawLine(x + 18, y + 22, x + 18, y + 28, color);
+    d.fillRect(x + 10, y + 28, 17, 2, color);
+}
+
 }  // namespace AiPinWifiApp
+
+#include <stick_os.h>
+
+static const stick_os::AppDescriptor kAipinDescriptor = {
+    /*id=*/       "aipin",
+    /*name=*/     "AiPin",
+    /*version=*/  "1.0.0",
+    /*category=*/ stick_os::CAT_UTILITY,
+    /*flags=*/    stick_os::APP_NEEDS_NET | stick_os::APP_NEEDS_MIC,
+    /*icon=*/     &AiPinWifiApp::icon,
+    /*runtime=*/  stick_os::RUNTIME_NATIVE,
+    /*native=*/   { &AiPinWifiApp::init, &AiPinWifiApp::tick, nullptr, nullptr },
+    /*script=*/   { nullptr, nullptr },
+};
+STICK_REGISTER_APP(kAipinDescriptor);
