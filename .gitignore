@@ -28,6 +28,7 @@ third_party/
 **/superpowers/
 
 # Session state
+.claude/
 .remember/
 
 # Python
