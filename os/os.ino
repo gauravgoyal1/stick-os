@@ -28,6 +28,7 @@
 #include <settings_wifi.h>
 #include <settings_storage.h>
 #include <settings_apps.h>
+#include <settings_time.h>
 
 namespace {
 
