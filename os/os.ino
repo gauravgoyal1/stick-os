@@ -363,7 +363,7 @@ void setup() {
         StickCP2.Display.print("Connecting...");
 
         StickNet::startAsync();
-        StickNet::waitForReady(12000);
+        StickNet::waitForReady(20000);
         bool connected = StickNet::isConnected();
 
         if (!connected) {
