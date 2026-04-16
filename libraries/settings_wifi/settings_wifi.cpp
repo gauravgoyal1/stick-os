@@ -1,7 +1,7 @@
 #include <M5StickCPlus2.h>
 #include <stick_os.h>
 #include <stick_net.h>
-#include <wifi_config.h>
+#include <stick_config.h>
 #include "settings_wifi.h"
 
 namespace SettingsWiFi {

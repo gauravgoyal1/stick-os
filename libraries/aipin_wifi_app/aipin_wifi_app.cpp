@@ -1,8 +1,7 @@
 #include <M5StickCPlus2.h>
 #include <WiFiClient.h>
 
-#include <wifi_config.h>
-#include <secrets_config.h>
+#include <stick_config.h>
 #include <stick_net.h>
 #include "aipin_wifi_app.h"
 

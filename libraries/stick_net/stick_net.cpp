@@ -5,7 +5,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 
-#include <wifi_config.h>
+#include <stick_config.h>
 #include "stick_net.h"
 
 namespace StickNet {
