@@ -353,23 +353,18 @@ void setup() {
         Serial.printf("  [%u] %s (cat=%u)\n", (unsigned)i, d->name, d->category);
     }
 
-    // WiFi: try last-connected SSID first, fall back to picker
+    // WiFi: auto-connect to known networks, fall back to picker
     {
-        char lastSSID[33] = {0};
-        bool connected = false;
+        StickCP2.Display.setRotation(0);
+        StickCP2.Display.fillScreen(BLACK);
+        StickCP2.Display.setTextSize(1);
+        StickCP2.Display.setTextColor(YELLOW, BLACK);
+        StickCP2.Display.setCursor(20, 100);
+        StickCP2.Display.print("Connecting...");
 
-        if (stick_os::getLastConnectedSSID(lastSSID, sizeof(lastSSID)) && lastSSID[0] != '\0') {
-            StickCP2.Display.setRotation(0);
-            StickCP2.Display.fillScreen(BLACK);
-            StickCP2.Display.setTextSize(1);
-            StickCP2.Display.setTextColor(YELLOW, BLACK);
-            StickCP2.Display.setCursor(20, 100);
-            StickCP2.Display.printf("Connecting to\n  %s...", lastSSID);
-
-            StickNet::startAsync();
-            StickNet::waitForReady(10000);
-            connected = StickNet::isConnected();
-        }
+        StickNet::startAsync();
+        StickNet::waitForReady(12000);
+        bool connected = StickNet::isConnected();
 
         if (!connected) {
             connected = stick_os::showWiFiPicker();
