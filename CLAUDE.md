@@ -15,12 +15,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`tools/`** — Build, flash, and publish tooling.
 - **`docs/`** — Design specs and implementation plans.
 
-## Current apps (15 native)
+## Current apps (19 native)
 
 **Games (7):** `game_flappy`, `game_dino`, `game_scream`, `game_galaxy`, `game_balance`, `game_simon`, `game_panic` — each in `libraries/game_*/`
-**Apps (1):** `aipin_wifi_app` — audio streaming via WebSocket to `/services/aipin`
-**Sensors (3):** `sensor_battery`, `sensor_imu`, `sensor_wifi_scan`
-**Settings (4):** `settings_about`, `settings_wifi`, `settings_storage`, `settings_apps`
+**Apps (3):** `aipin_wifi_app` (audio streaming via WebSocket), `app_stopwatch`, `app_flashlight`
+**Sensors (4):** `sensor_battery`, `sensor_imu`, `sensor_wifi_scan`, `sensor_mic`
+**Settings (5):** `settings_about`, `settings_wifi`, `settings_storage`, `settings_apps`, `settings_time`
 
 Shared game helpers live in `libraries/arcade_common/`.
 

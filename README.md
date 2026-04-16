@@ -1,55 +1,74 @@
-# electronics-lab
+# stick-os
 
-A personal sandbox for small electronics projects, mostly on the **M5StickC Plus 2** (ESP32), plus breadboard / sensor experiments over time.
+Launcher firmware for the **M5StickC Plus 2** (ESP32) — a tiny wearable computer with a portrait-mode category picker, 19 native apps, WiFi connectivity, and a FastAPI backend for app catalog and audio streaming.
 
-Each top-level directory is either a single-sketch mini app or an **umbrella** grouping related components. Sub-projects share some tooling (`tools/flash.sh`, `libraries/`) but otherwise don't depend on each other.
+## What's inside
 
-## Projects
+| Category | Apps |
+|---|---|
+| **Games (7)** | Flappy, Dino, Scream, Galaxy, Balance, Simon, Panic |
+| **Apps (3)** | AiPin (audio streaming), Stopwatch, Flashlight |
+| **Sensors (4)** | Battery, IMU, WiFi Scan, Mic Meter |
+| **Settings (5)** | About, WiFi, Storage, Installed Apps, Time |
 
-| Dir | What it is | Status |
-|---|---|---|
-| [`aipin/`](aipin) | AiPin audio streamer — `bl/` (Bluetooth SPP), `wifi/` (WiFi + TCP), and a Python `server/` | Working |
-| [`arcade/`](arcade) | Multi-game sketch (flappy, dino, scream, galaxy, balance, simon) | Working |
-| [`clap_remote/`](clap_remote) | Clap-activated IR remote for a TCL Mini LED TV | 🚧 Phase 1 in progress |
-| [`diagnostics/`](diagnostics) | Project-agnostic hardware test sketches — `hello_world/`, `ir_probe/`, `ir_sweep/` | Working |
+## Repo structure
 
-## Shared tooling
+```
+os/          → Stick OS firmware (Arduino sketch)
+libraries/   → Shared C++ libraries (one per app + OS core)
+server/      → FastAPI backend (catalog, firmware updates, audio streaming)
+tools/       → Build, flash, and WiFi seeding scripts
+apps/        → MicroPython app sources (Phase 2, not yet active)
+docs/        → Design specs and implementation plans
+```
 
-- [`tools/flash.sh`](tools/flash.sh) — one-liner to `arduino-cli compile && upload` any sketch directory. Hard-codes the M5StickC Plus 2 FQBN and a USB port; edit those two lines if you use a different board or port. Passes `--libraries` so sketches can `#include` from `libraries/` at the repo root.
-- `libraries/` — shared Arduino C++ libraries, empty day one and filled organically when a second sketch wants a helper. Some libraries are **gitignored config files**:
-  - `libraries/wifi_config/wifi_config.h` — WiFi credentials (SSID/password priority list)
-  - `libraries/secrets_config/secrets_config.h` — server endpoints and other runtime secrets
+## Quick start
 
-  Each has a tracked `.example` template. On a fresh clone, `cp *.h.example *.h` inside each dir and fill in real values before building any WiFi-using sketch.
+### Build & flash
+
+```bash
+# Compile + upload the OS firmware
+./tools/flash.sh os
+
+# Compile only (no upload)
+arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 \
+  --libraries "$(git rev-parse --show-toplevel)/libraries" os
+```
+
+### Device configuration
+
+```bash
+cp libraries/stick_config/stick_config.h.example libraries/stick_config/stick_config.h
+# Edit with your server host
+```
+
+### WiFi setup
+
+WiFi credentials are stored in NVS (device flash), never in source code.
+
+```bash
+./tools/wifi_seed.py add --port /dev/cu.usbserial-XXXX --ssid "MyNetwork" --password "secret"
+./tools/wifi_seed.py list --port /dev/cu.usbserial-XXXX
+./tools/wifi_seed.py delete --port /dev/cu.usbserial-XXXX --ssid "MyNetwork"
+```
+
+### Server
+
+```bash
+cd server
+pip install -r requirements.txt
+cp .env.example .env  # fill in GEMINI_API_KEY, STICK_DOMAIN
+uvicorn main:app --host 0.0.0.0 --port 8765
+```
 
 ## Hardware
 
-Most projects target the [M5StickC Plus 2](https://docs.m5stack.com/en/core/M5StickC%20PLUS2): ESP32-PICO-V3-02, built-in PDM mic, IR LED, 135×240 LCD, two buttons. Future projects may branch out to a bare ESP32 + breadboard + sensors.
+[M5StickC Plus 2](https://docs.m5stack.com/en/core/M5StickC%20PLUS2): ESP32-PICO-V3-02, 8 MB flash, built-in PDM mic, IR LED, 135x240 LCD, two buttons.
 
-## Convention
+## Architecture
 
-- Every top-level dir is either a single-sketch mini app (`arcade/`, `clap_remote/`) or an umbrella grouping related components (`aipin/` contains `bl/`, `wifi/`, `server/`; `diagnostics/` contains multiple test sketches). No nested `firmware/` subdirectory layer.
-- Sketch dirs follow Arduino conventions: `<name>/<name>.ino`, with optional `.h`/`.cpp` siblings and an optional `docs/` subfolder (arduino-cli ignores non-source subdirs).
-- Per-project notes live inside the project folder (`<project>/CLAUDE.md`, `<project>/README.md`).
-- Root-level `CLAUDE.md` gives working notes to Claude / future-me for the whole repo.
-- Superpowers workflow files (`docs/superpowers/` at any depth) are gitignored — specs and plans are session-scoped workspace artifacts, not tracked deliverables.
+Each app is a self-contained library in `libraries/` that registers via `STICK_REGISTER_APP(...)`. The OS boots to a portrait-mode category picker (Games / Apps / Sensors / Settings). PWR-click exits any app. WiFi goes through `StickNet::` — apps never touch `WiFi.h` directly.
 
-## Quick reference — build any sketch
+## License
 
-```bash
-./tools/flash.sh aipin/bl
-./tools/flash.sh aipin/wifi
-./tools/flash.sh arcade
-./tools/flash.sh clap_remote
-./tools/flash.sh diagnostics/ir_sweep
-```
-
-Compile-only (no upload):
-
-```bash
-arduino-cli compile --fqbn m5stack:esp32:m5stack_stickc_plus2 \
-  --libraries "$(git rev-parse --show-toplevel)/libraries" \
-  <sketch-dir>
-```
-
-See each sub-project's `CLAUDE.md` / `README.md` for project-specific setup (WiFi bootstrap, pairing, etc.).
+MIT
