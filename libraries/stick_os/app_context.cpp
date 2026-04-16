@@ -23,4 +23,11 @@ bool checkAppExit() {
 bool wasExitRequested() { return g_exitRequested; }
 void clearExitRequest() { g_exitRequested = false; }
 
+void logHeap(const char* tag) {
+    Serial.printf("[heap] %s: %lu free / %lu total\n",
+        tag,
+        (unsigned long)ESP.getFreeHeap(),
+        (unsigned long)ESP.getHeapSize());
+}
+
 }  // namespace stick_os
