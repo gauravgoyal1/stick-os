@@ -24,6 +24,7 @@
 #include <settings_about.h>
 #include <sensor_battery.h>
 #include <sensor_wifi_scan.h>
+#include <sensor_imu.h>
 
 namespace {
 
