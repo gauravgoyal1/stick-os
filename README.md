@@ -4,7 +4,7 @@ Launcher firmware for the **M5StickC Plus 2** (ESP32) — a tiny wearable comput
 
 ![status](https://img.shields.io/badge/status-phase%202-brightgreen)
 ![platform](https://img.shields.io/badge/platform-ESP32--PICO--V3--02-blue)
-![flash](https://img.shields.io/badge/flash-45%25%20of%203MB-informational)
+![flash](https://img.shields.io/badge/flash-46%25%20of%203MB-informational)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 ## About
@@ -13,7 +13,7 @@ Launcher firmware for the **M5StickC Plus 2** (ESP32) — a tiny wearable comput
 
 What's in the box:
 
-- **21 native apps** covering arcade games, utilities, sensor readouts, and system settings, all compiled into the firmware (45% of a 3 MB OTA slot).
+- **21 native apps** covering arcade games, utilities, sensor readouts, and system settings, all compiled into the firmware (46% of a 3 MB OTA slot).
 - **Downloadable scripted apps** via an embedded MicroPython v1.28.0 VM. Scripts import a narrow `stick` module (display / buttons / imu / store / timing) and run in a sandboxed GC heap that's torn down after each launch.
 - **On-device App Store** that fetches a server-hosted catalog over HTTPS, downloads files with SHA256 verification, and registers the app into the runtime registry without a reboot.
 - **Firmware OTA** with dual 3 MB slots — `Settings → Update` checks a versioned manifest, streams the new binary into the inactive slot, verifies SHA256, and switches the boot target on success. LittleFS survives across updates so installed scripted apps persist.
@@ -39,7 +39,7 @@ It's a dense slice of embedded infrastructure — persistent per-app NVS namespa
 
 | App | Description |
 |---|---|
-| **Scribe** | Record audio and stream to the server over WebSocket for AI transcription via Gemini |
+| **Scribe** | Record audio over WebSocket for server-side Gemini transcription; **B** opens a history viewer for past transcripts (word-wrapped, scrollable with A/B) |
 | **Timer** | Stopwatch with start/stop, lap counter, and centisecond precision |
 | **Light** | Turns the display full white as a flashlight/torch |
 
@@ -74,6 +74,8 @@ Shipped reference apps under `apps/`:
 | **tilt** | utility | IMU bubble level. A zeros the reference |
 
 Scripted apps can only be `game` or `utility` — sensor/settings categories stay native.
+
+> 📖 **[APPS.md](APPS.md)** — per-app reference with controls, persisted state, and hardware requirements for every app above.
 
 ## Repo structure
 
@@ -128,6 +130,15 @@ pip install -r requirements-dev.txt
 python3 -m pytest
 ```
 
+Endpoints:
+- `GET /api/catalog` — scripted-app catalog
+- `GET /api/firmware` — firmware update manifest
+- `GET /api/wifi` — WiFi credential sync
+- `GET /api/transcripts` — list of past Scribe transcripts (`name`, `timestamp`, `size`)
+- `GET /api/transcripts/<name>` — fetch a transcript body as plain text
+- `GET /apps/<id>/<file>` / `GET /firmware/<file>` — static mounts for downloads
+- `WS /services/scribe` — Scribe audio stream + Gemini transcription
+
 ## Installing scripted apps
 
 Two paths:
@@ -146,7 +157,9 @@ Writes `/apps/snake/{manifest.json,main.py}` to the device's LittleFS via the `F
    ```
 2. On the device: **Settings → Store** → select app → **A** to install. Downloads each file from `/api/catalog` over HTTPS, verifies SHA256, writes to LittleFS, registers the descriptor immediately.
 
-Uninstall via `APP_RM <id>` serial command (or add an uninstall tab to Store).
+**Publishing to the server (dev flow):** `./tools/publish_app.py [snake tilt ...]` copies `apps/<id>/` into `server/storage/apps/<id>/` and regenerates `server/storage/catalog.json` with real sizes and sha256s. Run on the host that serves `/api/catalog`; restart uvicorn after a first-time publish into a previously-empty storage tree so `StaticFiles` mounts the new path.
+
+Uninstall on device: Store → select installed app (green ✓) → **A** → confirm with **A**. Or `APP_RM <id>` over serial.
 
 ## Firmware OTA
 
@@ -181,6 +194,10 @@ stick.BLACK WHITE RED GREEN BLUE YELLOW CYAN
 ```
 
 Extending: edit `tools/user_c_modules/stick/mod_stick.c` + `stick_bindings.cpp`, then `./tools/build_mpy_vm.sh` to regenerate.
+
+## Editor tooling
+
+`./tools/gen_clangd.sh` dumps arduino-cli's exact `-I`/`-D` flags into a `.clangd` at repo root so clangd can resolve `#include <M5StickCPlus2.h>` and friends and give useful diagnostics (instead of a wall of "file not found"). Regenerate after a core or library update. `.clangd` is gitignored — paths are user-specific.
 
 ## Hardware
 

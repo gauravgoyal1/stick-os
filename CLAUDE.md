@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current apps (21 native + 2 reference scripted)
 
 **Games (7):** `game_flappy`, `game_dino`, `game_scream`, `game_galaxy`, `game_balance`, `game_simon`, `game_panic` — each in `libraries/game_*/`
-**Apps / Utilities (3):** `scribe` (audio streaming via WebSocket), `app_stopwatch`, `app_flashlight`
+**Apps / Utilities (3):** `scribe` (audio streaming via WebSocket + on-device transcript history viewer), `app_stopwatch`, `app_flashlight`
 **Sensors (4):** `sensor_battery`, `sensor_imu`, `sensor_wifi_scan`, `sensor_mic`
 **Settings (7):** `settings_about`, `settings_wifi`, `settings_storage`, `settings_apps`, `settings_time`, `settings_update` (firmware OTA), `app_store` (scripted-app installer)
 
@@ -110,9 +110,11 @@ journalctl --user -u stick-os-server -f
 - `GET /api/catalog` — app catalog JSON (defaults to `{"version":1,"apps":[]}` when file missing)
 - `GET /api/firmware` — firmware metadata (version / path / size / sha256)
 - `GET /api/wifi` — WiFi credentials for device sync
+- `GET /api/transcripts` — Scribe recording metadata `[{name, timestamp, size}, ...]`, newest first
+- `GET /api/transcripts/{name}` — transcript body as `text/plain` (filename must match `scribe_YYYYMMDD_HHMMSS.txt`, traversal-guarded)
 - `GET /apps/{id}/{file}` — scripted-app downloads (static mount from `storage/apps/`)
 - `GET /firmware/{file}` — firmware binary downloads
-- `WS /services/scribe` — Scribe audio streaming + Gemini transcription
+- `WS /services/scribe` — Scribe audio streaming + Gemini transcription (firmware sends signed int8, server writes unsigned-centered 8-bit PCM WAV)
 
 ## Catalog format
 
@@ -150,8 +152,11 @@ stick.BLACK WHITE RED GREEN BLUE YELLOW CYAN   # RGB565
 ```
 
 Installation:
-- `./tools/push_app.py --port ... --app apps/snake` — direct install over serial.
-- Or use the **Store** native app to fetch via HTTPS from `/api/catalog`.
+- `./tools/push_app.py --port ... --app apps/snake` — direct install over serial (dev).
+- `./tools/publish_app.py [snake tilt ...]` — copies apps into `server/storage/apps/` and regenerates `catalog.json`; run on the server host. Restart uvicorn after a first-time publish into an empty storage tree so `StaticFiles` mounts `/apps`.
+- Or use the **Store** native app on-device to fetch via HTTPS from `/api/catalog`. Store also handles uninstall (A on an installed row → confirm prompt).
+
+Runtime note: the minimal embed build strips most stdlib (no `random`, no `time`, no `str.format`) and uses 30-bit small ints. The reference `snake` / `tilt` apps avoid those features deliberately — mimic them when writing new scripted apps.
 
 Runtime: `stick_os::scriptRunFile(path)` re-creates the MicroPython VM per launch (32 KB GC heap default), executes the .py source, tears down. xtensa uses setjmp-based NLR / GC-regs (not the default asm paths).
 
@@ -169,10 +174,14 @@ Added to `os/serial_cmd.cpp` — all reach the device via `./tools/wifi_seed.py`
 ## Storage budget
 
 The M5StickC Plus 2 has 8 MB flash.
-- Firmware with MPY VM + bindings + OTA + App Store: ~1.54 MB (45% of 3 MB OTA slot).
+- Firmware with MPY VM + bindings + OTA + App Store + Scribe history viewer: ~1.54 MB (46% of 3 MB OTA slot).
 - LittleFS partition: 1.9 MB for scripted apps.
 - Baseline MPY VM adds ~126 KB flash. Each binding function adds ~200-500 bytes.
 - Every feature must justify its flash cost — measure with `arduino-cli compile` after every change. Budget rule: > 50 KB for a non-core feature needs explicit justification.
+
+## Editor tooling
+
+`./tools/gen_clangd.sh` runs an `arduino-cli compile --verbose`, scrapes the real `-I`/`-D` flags, filters xtensa-only codegen flags that trip up a host clangd, and writes `.clangd` at repo root. Without it, clangd can't find `M5StickCPlus2.h` and spams false-positive diagnostics. `.clangd` is gitignored — paths are user-specific. Regenerate after a core or library update.
 
 ## Conventions
 
