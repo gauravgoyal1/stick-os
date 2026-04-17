@@ -6,19 +6,19 @@
       "name": "Snake",
       "version": "1.0.0",
       "category": "game",
-      "description": "Classic snake. A=right, B=left.",
+      "description": "Classic snake. A=turn right, B=turn left.",
       "files": [
-        {
-          "name": "manifest.json",
-          "url": "/apps/snake/manifest.json",
-          "size": 0,
-          "sha256": ""
-        },
         {
           "name": "main.py",
           "url": "/apps/snake/main.py",
-          "size": 0,
-          "sha256": ""
+          "size": 3734,
+          "sha256": "b66b257553e615ed3db329256cb2325cee76ef10dbf2eb59a930b780e46d1ea7"
+        },
+        {
+          "name": "manifest.json",
+          "url": "/apps/snake/manifest.json",
+          "size": 211,
+          "sha256": "28ff5bb8c4db70f0cd9b2986c171a17f9524e58cfbe74a3c1459c0263378c94d"
         }
       ]
     },
@@ -27,19 +27,19 @@
       "name": "Tilt",
       "version": "1.0.0",
       "category": "utility",
-      "description": "Bubble level — A to zero.",
+      "description": "Bubble level \u2014 IMU-driven spirit level. A to zero the reference.",
       "files": [
-        {
-          "name": "manifest.json",
-          "url": "/apps/tilt/manifest.json",
-          "size": 0,
-          "sha256": ""
-        },
         {
           "name": "main.py",
           "url": "/apps/tilt/main.py",
-          "size": 0,
-          "sha256": ""
+          "size": 3619,
+          "sha256": "511e48715008e6ba71728b7b44c641669bbde55b51a6cfdc75ef02901bd8e3f1"
+        },
+        {
+          "name": "manifest.json",
+          "url": "/apps/tilt/manifest.json",
+          "size": 236,
+          "sha256": "720233b68cf374a58dc5c722df7972262eca25a75ebcfcb64833e82038401b39"
         }
       ]
     }
