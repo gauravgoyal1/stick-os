@@ -14,10 +14,12 @@ app = FastAPI(title="Stick OS Server")
 # API routes
 from api.catalog import router as catalog_router
 from api.firmware import router as firmware_router
+from api.transcripts import router as transcripts_router
 from api.wifi import router as wifi_router
 
 app.include_router(catalog_router, prefix="/api")
 app.include_router(firmware_router, prefix="/api")
+app.include_router(transcripts_router, prefix="/api")
 app.include_router(wifi_router, prefix="/api")
 
 # Service routes (WebSocket)

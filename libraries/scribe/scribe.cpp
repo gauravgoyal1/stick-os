@@ -1,10 +1,13 @@
 #include <M5StickCPlus2.h>
 #include <ArduinoWebsockets.h>
+#include <HTTPClient.h>
+#include <NetworkClientSecure.h>
 using namespace websockets;
 
 #include <stick_config.h>
 #include <stick_net.h>
 #include <stick_store.h>
+#include <stick_os.h>
 #include <status_strip.h>
 #include "scribe.h"
 
@@ -54,6 +57,40 @@ bool isRecording = false;
 unsigned long recordStartMillis = 0;
 bool isWiFiConnected = false;
 bool isServerConnected = false;
+
+// ==========================================
+//          TRANSCRIPT HISTORY
+// ==========================================
+enum Screen {
+    S_MAIN,          // connected / disconnected — recording screen when isRecording
+    S_HISTORY_LIST,
+    S_HISTORY_TEXT,
+};
+Screen g_screen = S_MAIN;
+
+struct HistoryEntry {
+    char name[40];       // "scribe_20260417_181732.txt"
+    char timestamp[20];  // "2026-04-17 18:17:32"
+    uint32_t size;
+};
+#define MAX_HISTORY 32
+HistoryEntry g_history[MAX_HISTORY];
+int g_historyCount = 0;
+int g_historyCursor = 0;
+bool g_historyFetched = false;
+
+// Transcript viewer state. Full body held in g_textBuffer (capped at
+// MAX_TEXT_BYTES); lines pre-wrapped into g_lines offsets so scroll is
+// just an index shift.
+#define MAX_TEXT_BYTES 65536
+#define MAX_TEXT_LINES 1600
+String   g_textBuffer;
+uint16_t g_lineOffsets[MAX_TEXT_LINES];  // byte offsets into g_textBuffer
+uint16_t g_lineLens[MAX_TEXT_LINES];
+uint16_t g_lineCount = 0;
+uint16_t g_textScroll = 0;
+String   g_textHeader;   // timestamp shown above body
+bool     g_textOverflow = false;
 
 // Audio processing settings
 float audioGain       = 20.0;
@@ -526,10 +563,370 @@ void disconnectDevice() {
 }
 
 // ==========================================
+//        TRANSCRIPT HISTORY
+// ==========================================
+
+static String buildUrl(const char* path) {
+    const char* proto = (kStickServerPort == 443) ? "https://" : "http://";
+    String url = String(proto) + kStickServerHost;
+    if (kStickServerPort != 80 && kStickServerPort != 443) {
+        url += ":"; url += String(kStickServerPort);
+    }
+    if (path[0] != '/') url += "/";
+    url += path;
+    return url;
+}
+
+// GET a URL into `out`. Limits body length to `maxBytes` (caller-enforced,
+// used to prevent OOM on huge transcripts).
+static bool httpGet(const String& url, String& out, size_t maxBytes) {
+    NetworkClientSecure tls;
+    tls.setInsecure();
+    HTTPClient http;
+    if (!http.begin(tls, url)) return false;
+    int code = http.GET();
+    if (code != 200) { http.end(); return false; }
+    int total = http.getSize();
+    WiFiClient* stream = http.getStreamPtr();
+    out = "";
+    out.reserve(total > 0 && (size_t)total < maxBytes ? total : 4096);
+    uint8_t buf[512];
+    uint32_t deadline = millis() + 30000;
+    while (millis() < deadline && out.length() < maxBytes) {
+        size_t avail = stream->available();
+        if (avail == 0) {
+            if (!http.connected() && !stream->available()) break;
+            delay(5); continue;
+        }
+        size_t want = avail > sizeof(buf) ? sizeof(buf) : avail;
+        int n = stream->readBytes(buf, want);
+        if (n <= 0) break;
+        size_t room = maxBytes - out.length();
+        size_t take = (size_t)n > room ? room : (size_t)n;
+        for (size_t i = 0; i < take; i++) out += (char)buf[i];
+    }
+    http.end();
+    return out.length() > 0;
+}
+
+// Tiny JSON field extractor (same shape as app_store's).
+static bool jsonScanString(const String& body, int from, const char* key,
+                            char* out, size_t outSize, int* endPos) {
+    String pat = String("\"") + key + "\"";
+    int k = body.indexOf(pat, from);
+    if (k < 0) return false;
+    int colon = body.indexOf(':', k);
+    if (colon < 0) return false;
+    int q1 = body.indexOf('"', colon);
+    if (q1 < 0) return false;
+    int q2 = body.indexOf('"', q1 + 1);
+    if (q2 < 0) return false;
+    size_t n = (size_t)(q2 - q1 - 1);
+    if (n + 1 > outSize) n = outSize - 1;
+    memcpy(out, body.c_str() + q1 + 1, n);
+    out[n] = '\0';
+    if (endPos) *endPos = q2 + 1;
+    return true;
+}
+
+static uint32_t jsonScanInt(const String& body, int from, const char* key,
+                             int* endPos) {
+    String pat = String("\"") + key + "\"";
+    int k = body.indexOf(pat, from);
+    if (k < 0) return 0;
+    int colon = body.indexOf(':', k);
+    if (colon < 0) return 0;
+    int p = colon + 1;
+    while (p < (int)body.length() && (body[p] == ' ' || body[p] == '\t')) p++;
+    uint32_t v = 0;
+    while (p < (int)body.length() && body[p] >= '0' && body[p] <= '9') {
+        v = v * 10 + (body[p] - '0');
+        p++;
+    }
+    if (endPos) *endPos = p;
+    return v;
+}
+
+static bool fetchTranscriptList() {
+    g_historyCount = 0;
+    g_historyCursor = 0;
+    String body;
+    if (!httpGet(buildUrl("/api/transcripts"), body, 16 * 1024)) return false;
+
+    // Walk the transcripts array object-by-object using brace matching.
+    int arr = body.indexOf('[');
+    if (arr < 0) return false;
+    int pos = arr + 1;
+    while (g_historyCount < MAX_HISTORY) {
+        int objStart = body.indexOf('{', pos);
+        if (objStart < 0) break;
+        int depth = 1, p = objStart + 1;
+        while (p < (int)body.length() && depth > 0) {
+            char c = body[p];
+            if (c == '"') {
+                p++;
+                while (p < (int)body.length() && body[p] != '"') {
+                    if (body[p] == '\\' && p + 1 < (int)body.length()) p++;
+                    p++;
+                }
+            } else if (c == '{') depth++;
+            else if (c == '}') depth--;
+            p++;
+        }
+        if (depth != 0) break;
+        String obj = body.substring(objStart, p);
+
+        HistoryEntry& e = g_history[g_historyCount];
+        memset(&e, 0, sizeof(e));
+        int tmp;
+        if (!jsonScanString(obj, 0, "name", e.name, sizeof(e.name), &tmp)) {
+            pos = p; continue;
+        }
+        jsonScanString(obj, 0, "timestamp", e.timestamp, sizeof(e.timestamp), &tmp);
+        e.size = jsonScanInt(obj, 0, "size", &tmp);
+        g_historyCount++;
+        pos = p;
+    }
+    g_historyFetched = true;
+    return true;
+}
+
+// Word-wrap the current g_textBuffer into g_lineOffsets/g_lineLens for
+// a fixed character width. Breaks on spaces and on explicit '\n'. Falls
+// back to hard breaks for over-long words so nothing is lost.
+static void wrapText(uint16_t charsPerLine) {
+    g_lineCount = 0;
+    const size_t len = g_textBuffer.length();
+    const char* s = g_textBuffer.c_str();
+    size_t i = 0;
+    while (i < len && g_lineCount < MAX_TEXT_LINES) {
+        // Strip leading spaces on a new line (but preserve explicit blanks).
+        size_t lineStart = i;
+        size_t lastSpace = (size_t)-1;
+        size_t col = 0;
+        while (i < len) {
+            char c = s[i];
+            if (c == '\n') { break; }
+            if (c == ' ') lastSpace = i;
+            col++;
+            if (col > charsPerLine) {
+                // Break at last space if we have one past lineStart;
+                // otherwise hard break at current index.
+                if (lastSpace != (size_t)-1 && lastSpace > lineStart) {
+                    i = lastSpace;
+                } else {
+                    // hard break — step back one so the over-long char ends up
+                    // on the next line.
+                    i--;
+                }
+                break;
+            }
+            i++;
+        }
+        uint16_t lineLen = (uint16_t)(i - lineStart);
+        g_lineOffsets[g_lineCount] = (uint16_t)lineStart;
+        g_lineLens[g_lineCount] = lineLen;
+        g_lineCount++;
+        // Skip the delimiter (space or newline).
+        if (i < len && (s[i] == ' ' || s[i] == '\n')) i++;
+    }
+}
+
+static bool fetchTranscriptBody(const HistoryEntry& e) {
+    g_textBuffer = "";
+    g_textScroll = 0;
+    g_lineCount  = 0;
+    g_textOverflow = false;
+    g_textHeader = String(e.timestamp);
+
+    String url = buildUrl((String("/api/transcripts/") + e.name).c_str());
+    if (!httpGet(url, g_textBuffer, MAX_TEXT_BYTES)) return false;
+    g_textOverflow = (e.size > MAX_TEXT_BYTES);
+
+    // Screen width 135, size-1 font is 6 px/char. Leave a 6px margin each
+    // side → 123 px usable ≈ 20 chars per line.
+    wrapText(20);
+    return true;
+}
+
+static void drawHistoryHeader() {
+    auto& d = StickCP2.Display;
+    d.fillRect(0, CONTENT_Y, d.width(), 20, C_BLACK);
+    d.setTextSize(2);
+    d.setTextColor(C_CYAN, C_BLACK);
+    d.setCursor(6, CONTENT_Y + 2);
+    d.print("History");
+    d.drawFastHLine(0, CONTENT_Y + 20, d.width(), C_DARKGRAY);
+}
+
+static void drawHistoryList() {
+    auto& d = StickCP2.Display;
+    drawHistoryHeader();
+    const int firstY  = CONTENT_Y + 26;
+    const int rowH    = 26;
+    const int maxRows = 7;
+    const int footerY = d.height() - 12;
+
+    d.fillRect(0, firstY, d.width(), footerY - firstY, C_BLACK);
+
+    if (g_historyCount == 0) {
+        d.setTextSize(1);
+        d.setTextColor(C_GRAY, C_BLACK);
+        d.setCursor(10, firstY + 20);
+        d.print(g_historyFetched ? "No transcripts" : "Fetching...");
+    } else {
+        int start = g_historyCursor - 3;
+        if (start < 0) start = 0;
+        if (start > g_historyCount - maxRows) start = g_historyCount - maxRows;
+        if (start < 0) start = 0;
+
+        for (int i = 0; i < maxRows && (start + i) < g_historyCount; i++) {
+            const HistoryEntry& e = g_history[start + i];
+            const bool sel = (start + i) == g_historyCursor;
+            const int y = firstY + i * rowH;
+            const uint16_t fg = sel ? C_CYAN : C_GRAY;
+            const uint16_t bg = sel ? d.color565(10, 25, 30) : C_BLACK;
+
+            d.drawRoundRect(4, y, d.width() - 8, rowH - 3, 3, fg);
+            if (sel) d.fillRoundRect(5, y + 1, d.width() - 10, rowH - 5, 3, bg);
+
+            // Timestamp split: date on top line, time on second.
+            d.setTextSize(1);
+            d.setTextColor(sel ? C_WHITE : fg, bg);
+            d.setCursor(10, y + 3);
+            // e.timestamp = "2026-04-17 18:17:32"
+            char date[12] = {0}, tm[12] = {0};
+            int sp = 0;
+            while (e.timestamp[sp] && e.timestamp[sp] != ' ' && sp < 11) {
+                date[sp] = e.timestamp[sp]; sp++;
+            }
+            int ts = sp + 1;
+            int k = 0;
+            while (e.timestamp[ts] && k < 11) { tm[k++] = e.timestamp[ts++]; }
+            d.print(date[0] ? date : e.name);
+
+            d.setTextColor(sel ? C_CYAN : C_DARKGRAY, bg);
+            d.setCursor(10, y + 14);
+            d.print(tm);
+
+            // Size on the right.
+            d.setTextColor(C_DARKGRAY, bg);
+            d.setCursor(d.width() - 38, y + 14);
+            if (e.size >= 1024) d.printf("%uk", (unsigned)(e.size / 1024));
+            else                d.printf("%uB", (unsigned)e.size);
+        }
+    }
+
+    d.setTextSize(1);
+    d.setTextColor(C_DARKGRAY, C_BLACK);
+    d.setCursor(4, footerY);
+    d.print("A:open B:next PWR:back");
+}
+
+static void drawHistoryText() {
+    auto& d = StickCP2.Display;
+    d.fillRect(0, CONTENT_Y, d.width(), d.height() - CONTENT_Y, C_BLACK);
+
+    // Header: timestamp + scroll indicator.
+    d.setTextSize(1);
+    d.setTextColor(C_CYAN, C_BLACK);
+    d.setCursor(4, CONTENT_Y + 2);
+    d.print(g_textHeader);
+    if (g_lineCount > 0) {
+        d.setTextColor(C_DARKGRAY, C_BLACK);
+        d.setCursor(d.width() - 46, CONTENT_Y + 2);
+        d.printf("%u/%u", (unsigned)(g_textScroll + 1),
+                 (unsigned)g_lineCount);
+    }
+    d.drawFastHLine(0, CONTENT_Y + 14, d.width(), C_DARKGRAY);
+
+    const int firstY   = CONTENT_Y + 18;
+    const int lineH    = 10;
+    const int footerY  = d.height() - 12;
+    const int maxLines = (footerY - firstY) / lineH;
+
+    d.setTextColor(C_WHITE, C_BLACK);
+    for (int i = 0; i < maxLines && (g_textScroll + i) < g_lineCount; i++) {
+        uint16_t off = g_lineOffsets[g_textScroll + i];
+        uint16_t len = g_lineLens[g_textScroll + i];
+        char tmp[32];
+        if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
+        memcpy(tmp, g_textBuffer.c_str() + off, len);
+        tmp[len] = '\0';
+        d.setCursor(4, firstY + i * lineH);
+        d.print(tmp);
+    }
+
+    if (g_lineCount == 0) {
+        d.setTextColor(C_GRAY, C_BLACK);
+        d.setCursor(10, firstY + 20);
+        d.print("(empty)");
+    }
+    if (g_textOverflow) {
+        d.setTextColor(C_ORANGE, C_BLACK);
+        d.setCursor(4, footerY - 12);
+        d.print("-- truncated --");
+    }
+
+    d.setTextColor(C_DARKGRAY, C_BLACK);
+    d.setCursor(4, footerY);
+    d.print("A:down B:up PWR:back");
+}
+
+static void enterHistoryList() {
+    g_screen = S_HISTORY_LIST;
+    g_historyFetched = false;
+    drawHistoryList();
+    if (!isServerConnected) {
+        auto& d = StickCP2.Display;
+        d.setTextColor(C_ORANGE, C_BLACK);
+        d.setCursor(10, CONTENT_Y + 40);
+        d.print("Offline");
+        g_historyFetched = true;
+        return;
+    }
+    if (fetchTranscriptList()) {
+        drawHistoryList();
+    } else {
+        auto& d = StickCP2.Display;
+        d.setTextColor(C_RED, C_BLACK);
+        d.setCursor(10, CONTENT_Y + 40);
+        d.print("Fetch failed");
+        g_historyFetched = true;
+    }
+}
+
+static void enterHistoryText(int idx) {
+    if (idx < 0 || idx >= g_historyCount) return;
+    g_screen = S_HISTORY_TEXT;
+    auto& d = StickCP2.Display;
+    d.fillRect(0, CONTENT_Y, d.width(), d.height() - CONTENT_Y, C_BLACK);
+    d.setTextColor(C_CYAN, C_BLACK);
+    d.setTextSize(1);
+    d.setCursor(10, CONTENT_Y + 20);
+    d.print("Loading...");
+
+    if (!fetchTranscriptBody(g_history[idx])) {
+        d.fillRect(0, CONTENT_Y + 16, d.width(), 16, C_BLACK);
+        d.setTextColor(C_RED, C_BLACK);
+        d.setCursor(10, CONTENT_Y + 20);
+        d.print("Fetch failed");
+        return;
+    }
+    drawHistoryText();
+}
+
+// ==========================================
 //              SETUP
 // ==========================================
 void init() {
     Serial.println("\n[Scribe] Booting...");
+
+    g_screen = S_MAIN;
+    g_historyFetched = false;
+    g_textBuffer = "";
+    g_textScroll = 0;
+    g_lineCount = 0;
 
     StickCP2.Speaker.begin();
     StickCP2.Speaker.setVolume(120);
@@ -570,7 +967,55 @@ void init() {
 // ==========================================
 //              MAIN LOOP
 // ==========================================
+static void tickHistoryList() {
+    if (StickCP2.BtnB.wasPressed() && g_historyCount > 0) {
+        g_historyCursor = (g_historyCursor + 1) % g_historyCount;
+        drawHistoryList();
+    }
+    if (StickCP2.BtnA.wasPressed() && g_historyCount > 0) {
+        enterHistoryText(g_historyCursor);
+    }
+}
+
+static void tickHistoryText() {
+    auto& d = StickCP2.Display;
+    const int firstY   = CONTENT_Y + 18;
+    const int lineH    = 10;
+    const int footerY  = d.height() - 12;
+    const int visible  = (footerY - firstY) / lineH;
+
+    bool changed = false;
+    if (StickCP2.BtnA.wasPressed() && g_lineCount > 0) {
+        if (g_textScroll + visible < g_lineCount) {
+            g_textScroll++;
+            changed = true;
+        }
+    }
+    if (StickCP2.BtnB.wasPressed() && g_lineCount > 0) {
+        if (g_textScroll > 0) {
+            g_textScroll--;
+            changed = true;
+        }
+    }
+    if (changed) drawHistoryText();
+}
+
 void tick() {
+    // History screens own the display while active; network status is
+    // still tracked via the shared flags but we don't clobber the UI.
+    if (g_screen == S_HISTORY_LIST) {
+        tickHistoryList();
+        delay(20);
+        return;
+    }
+    if (g_screen == S_HISTORY_TEXT) {
+        tickHistoryText();
+        delay(20);
+        return;
+    }
+
+    // ---- S_MAIN: existing connected / recording / disconnected flow ----
+
     // Check WiFi connection
     if (!StickNet::isConnected()) {
         if (isWiFiConnected) {
@@ -583,7 +1028,6 @@ void tick() {
             drawDisconnectedScreen(DISC_WIFI);
         }
 
-        // Try to reconnect periodically
         static unsigned long lastWiFiRetry = 0;
         if (millis() - lastWiFiRetry > 10000) {
             isWiFiConnected = StickNet::connectWiFi();
@@ -600,7 +1044,6 @@ void tick() {
 
     isWiFiConnected = true;
 
-    // Check server connection
     if (!wsClient.available()) {
         if (isServerConnected) {
             isServerConnected = false;
@@ -611,7 +1054,6 @@ void tick() {
             drawDisconnectedScreen(DISC_SERVER);
         }
 
-        // Try to reconnect periodically
         static unsigned long lastServerRetry = 0;
         if (millis() - lastServerRetry > 5000) {
             isServerConnected = connectToServer();
@@ -625,7 +1067,6 @@ void tick() {
 
     isServerConnected = true;
 
-    // Handle connected state
     if (isRecording) {
         captureAndStreamChunk();
 
@@ -638,12 +1079,8 @@ void tick() {
         if (StickCP2.BtnA.wasPressed()) {
             stopRecording();
         }
-
-        if (StickCP2.BtnB.wasPressed()) {
-            stopRecording();
-            delay(100);
-            disconnectDevice();
-        }
+        // B is a no-op while recording — history is reachable only from
+        // the idle connected screen.
 
     } else {
         if (StickCP2.BtnA.wasPressed()) {
@@ -651,13 +1088,11 @@ void tick() {
             delay(50);
             startRecording();
         }
-
         if (StickCP2.BtnB.wasPressed()) {
-            disconnectDevice();
+            enterHistoryList();
         }
     }
 
-    // Periodic heartbeat for debug
     static unsigned long lastHeartbeat = 0;
     if (millis() - lastHeartbeat > 5000) {
         Serial.printf("[Scribe] heartbeat: wifi=%d server=%d rec=%d rssi=%d\n",
@@ -665,7 +1100,6 @@ void tick() {
         lastHeartbeat = millis();
     }
 
-    // Skip delay during recording
     if (!isRecording) {
         delay(20);
     }
@@ -682,8 +1116,6 @@ void icon(int x, int y, uint16_t color) {
 }
 
 }  // namespace Scribe
-
-#include <stick_os.h>
 
 static const stick_os::AppDescriptor kDesc = {
     /*id=*/       "scribe",
