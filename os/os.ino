@@ -82,30 +82,23 @@ void setup() {
 
     stick_os::fsInit();
 
-    // ---- Phase 2b spike: measure MicroPython VM cost ----
-    // Heavy instrumentation — narrow down where hangs/crashes occur.
-    Serial.println("[spike] BEFORE mpy-pre");
-    Serial.flush();
+    // ---- Phase 2b/2c spike: MPY VM + stick module smoke test ----
+    // Confirms the VM still initialises and that the stick binding
+    // surface is reachable from Python. Remove once ScriptHost (2d)
+    // is running real apps.
     stick_os::logHeap("mpy-pre");
-    Serial.flush();
-    Serial.println("[spike] calling MicroPythonVM::init...");
-    Serial.flush();
-    delay(100);
-    bool ok = MicroPythonVM::init(16 * 1024);  // try 16KB heap first
-    Serial.printf("[spike] init returned %d\n", ok);
-    Serial.flush();
-    if (ok) {
+    if (MicroPythonVM::init(16 * 1024)) {
         stick_os::logHeap("mpy-post-init");
-        Serial.println("[spike] executing hello world...");
-        Serial.flush();
-        MicroPythonVM::execStr("print('Hello from MicroPython!')");
-        Serial.println("[spike] execStr returned");
-        Serial.flush();
+        MicroPythonVM::execStr(
+            "import stick\n"
+            "print('mpy ok, millis =', stick.millis())\n"
+            "stick.delay(50)\n"
+            "print('after delay, millis =', stick.millis())\n"
+            "print('exit flag:', stick.exit())\n"
+        );
         MicroPythonVM::deinit();
         stick_os::logHeap("mpy-post-deinit");
     }
-    Serial.println("[spike] DONE");
-    Serial.flush();
 
     stick_os::statusStripInit();
 

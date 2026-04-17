@@ -33,9 +33,11 @@ fi
 # generation target (micropython-embed-package), not the host example.
 cp "$REPO_ROOT/tools/mpconfigport.h" "$BUILD_DIR/mpconfigport.h"
 
-echo "[build_mpy_vm] generating embed port sources..."
-(cd "$BUILD_DIR" && make -f micropython_embed.mk clean || true)
-(cd "$BUILD_DIR" && make -f micropython_embed.mk)
+USER_MOD_DIR="$REPO_ROOT/tools/user_c_modules"
+
+echo "[build_mpy_vm] generating embed port sources (with user modules)..."
+(cd "$BUILD_DIR" && make -f micropython_embed.mk USER_C_MODULES="$USER_MOD_DIR" clean || true)
+(cd "$BUILD_DIR" && make -f micropython_embed.mk USER_C_MODULES="$USER_MOD_DIR")
 
 GEN_DIR="$BUILD_DIR/micropython_embed"
 if [[ ! -d "$GEN_DIR" ]]; then
@@ -53,6 +55,16 @@ for d in extmod genhdr port py shared; do
   rm -rf "$SRC_DIR/$d"
 done
 cp -R "$GEN_DIR"/* "$SRC_DIR/"
+
+# Copy user module sources into the Arduino library so arduino-cli
+# compiles them as part of the micropython_vm library. QSTRs have
+# already been baked into the generated qstrdefs by the embed build.
+for modDir in "$USER_MOD_DIR"/*/; do
+  modName=$(basename "$modDir")
+  echo "[build_mpy_vm] installing user module '$modName' into $SRC_DIR/port/"
+  find "$modDir" -maxdepth 1 \( -name '*.c' -o -name '*.cpp' -o -name '*.h' \) \
+    -exec cp {} "$SRC_DIR/port/" \;
+done
 
 n_c=$(find "$SRC_DIR" -name '*.c' | wc -l | tr -d ' ')
 n_h=$(find "$SRC_DIR" -name '*.h' | wc -l | tr -d ' ')
