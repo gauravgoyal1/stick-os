@@ -81,11 +81,16 @@ async def scribe_stream(websocket: WebSocket):
         wf.setframerate(sample_rate)
 
         # 3. Receive audio chunks until APND
+        # Firmware sends signed int8 (-128..127). WAV 8-bit PCM is unsigned
+        # (0..255, centered at 128) — convert before writing, otherwise the
+        # zero-crossing flips and the audio is unintelligible.
         chunk_count = 0
         while True:
             data = await websocket.receive_bytes()
             if len(data) >= 4 and data[:4] == b"APND":
                 break
+            if bit_depth == 8:
+                data = bytes((b + 128) & 0xFF for b in data)
             wf.writeframes(data)
             chunk_count += 1
 
