@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`libraries/micropython_vm/`** — Generated MicroPython v1.28.0 embed port + thin C++ wrapper. Regenerate via `./tools/build_mpy_vm.sh`. Do not edit the `src/extmod`, `src/genhdr`, `src/py`, `src/shared` subtrees — they get clobbered on regeneration.
 - **`libraries/stick_os/`** — OS core: app registry (static + dynamic), app context, status strip, WiFi picker, stick store (NVS), stick fs (LittleFS), script host (MPY runner), stick ota (firmware update), app installer (LittleFS scanner + manifest parser).
 - **`tools/user_c_modules/stick/`** — Canonical source for the Python `stick` module (`mod_stick.c`) and its C++ bindings (`stick_bindings.cpp`). `build_mpy_vm.sh` copies these into `libraries/micropython_vm/src/port/` after QSTR extraction.
-- **`server/`** — FastAPI backend. Serves the app catalog, firmware updates, WiFi credentials, and Scribe WebSocket audio streaming. Runs as a single uvicorn process. Test suite under `server/tests/`.
+- **`server/`** — FastAPI backend. Serves the app catalog, firmware updates, WiFi credentials, and Scribe WebSocket audio streaming. Runs as a single uvicorn process. Test suite under `server/tests/`. Production config (nginx, systemd) in `server/config/`.
 - **`apps/`** — MicroPython scripted app sources (`snake`, `tilt`, plus dev `demo`). Each has `manifest.json` + `main.py`.
 - **`docs/`** — Design specs and implementation plans.
 
@@ -96,6 +96,14 @@ uvicorn main:app --host 0.0.0.0 --port 8765
 # Tests
 pip install -r requirements-dev.txt
 python3 -m pytest        # 17 tests, ~0.3s
+```
+
+**Production deployment:** nginx reverse-proxy and systemd user service configs are in `server/config/`. See `server/config/README.md` for setup instructions. Manage the server with:
+
+```bash
+systemctl --user restart stick-os-server
+systemctl --user status stick-os-server
+journalctl --user -u stick-os-server -f
 ```
 
 **Endpoints:**

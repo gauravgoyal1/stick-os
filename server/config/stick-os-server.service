@@ -1,0 +1,13 @@
+[Unit]
+Description=Stick OS Server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$STICK_OS_SERVER_DIR
+ExecStart=$STICK_OS_SERVER_DIR/.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
