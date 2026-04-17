@@ -81,31 +81,44 @@ void enterAppList(stick_os::AppCategory cat) {
 
 void enterApp(const stick_os::AppDescriptor* app) {
     if (app == nullptr) return;
-    if (app->runtime != stick_os::RUNTIME_NATIVE) {
-        // Phase 2: scripted runtimes not yet supported — show a message
-        // instead of silently returning.
-        auto& d = StickCP2.Display;
-        setPortrait();
-        d.fillRect(0, stick_os::kStatusStripHeight, d.width(),
-                   d.height() - stick_os::kStatusStripHeight, BLACK);
-        d.setTextSize(1);
-        d.setTextColor(YELLOW, BLACK);
-        d.setCursor(10, 80);
-        d.print("Scripted apps");
-        d.setCursor(10, 96);
-        d.print("not yet supported");
-        d.setTextColor(d.color565(80, 80, 80), BLACK);
-        d.setCursor(10, 120);
-        d.print("PWR: back");
-        while (true) {
-            StickCP2.update();
-            if (M5.BtnPWR.wasClicked()) break;
-            delay(50);
+
+    if (app->runtime == stick_os::RUNTIME_MPY) {
+        if (app->script.path == nullptr) {
+            Serial.println("[stick] scripted app has no script.path");
+            return;
         }
+        Serial.printf("[stick] launching (mpy) %s from %s\n",
+                      app->name, app->script.path);
+        g_runningApp = app;
+
+        stick_os::AppContext ctx = {
+            /*contentX=*/ 0,
+            /*contentY=*/ stick_os::kStatusStripHeight,
+            /*contentW=*/ static_cast<int16_t>(StickCP2.Display.width()),
+            /*contentH=*/ static_cast<int16_t>(
+                StickCP2.Display.height() - stick_os::kStatusStripHeight),
+            /*store=*/    nullptr,
+        };
+        stick_os::_setCurrentContext(ctx);
+
+        setPortrait();
+        stick_os::statusStripDrawFull();
+        stick_os::statusStripTick(app->name);
+        stick_os::logHeap(app->name);
+
+        // Blocking — returns when the script exits (via PWR) or finishes.
+        stick_os::scriptRunFile(app->script.path);
+
+        stick_os::logHeap("mpy-exit");
+        stick_os::clearExitRequest();
+        g_runningApp = nullptr;
         g_btnDrainFrames = 6;
-        drawAppList();
+        // Fall through to the app list — caller (loop()) routes us back.
+        enterAppList(g_openCategory);
         return;
     }
+
+    if (app->runtime != stick_os::RUNTIME_NATIVE) return;
     if (app->native.init == nullptr) return;
     Serial.printf("[stick] launching %s\n", app->name);
     g_runningApp = app;

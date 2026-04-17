@@ -10,3 +10,4 @@
 #include "stick_fs.h"
 #include "status_strip.h"
 #include "wifi_picker.h"
+#include "script_host.h"

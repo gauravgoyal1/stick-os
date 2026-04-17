@@ -1,7 +1,9 @@
-// Serial command handler for USB provisioning (WiFi creds, API key).
+// Serial command handler for USB provisioning (WiFi creds, API key,
+// and LittleFS file seeding for scripted-app dev).
 
 #include "launcher_state.h"
 #include <stick_net.h>
+#include <LittleFS.h>
 
 namespace launcher {
 
@@ -57,6 +59,82 @@ void processSerialCommand() {
         } else {
             Serial.println("(no API key stored)");
         }
+    } else if (line.startsWith("FILE_PUT ")) {
+        // Format: FILE_PUT <path> <size>\n<size bytes>
+        // Simple binary seed — meant for dev tools pushing small .py files
+        // before the .stickapp installer (2e) lands.
+        String rest = line.substring(9);
+        int space = rest.indexOf(' ');
+        if (space < 0) {
+            Serial.println("ERR: usage FILE_PUT <path> <size>");
+            return;
+        }
+        String path = rest.substring(0, space);
+        size_t size = (size_t)rest.substring(space + 1).toInt();
+        if (size == 0 || size > 64 * 1024) {
+            Serial.println("ERR: bad size");
+            return;
+        }
+        // Ensure parent dirs exist (LittleFS needs explicit mkdir).
+        String dir = path;
+        int slash = dir.lastIndexOf('/');
+        if (slash > 0) {
+            String parent = dir.substring(0, slash);
+            if (!LittleFS.exists(parent)) LittleFS.mkdir(parent);
+        }
+        File f = LittleFS.open(path, "w");
+        if (!f) {
+            Serial.println("ERR: open failed");
+            return;
+        }
+        size_t remaining = size;
+        const uint32_t deadline = millis() + 10000;
+        while (remaining > 0 && millis() < deadline) {
+            if (Serial.available()) {
+                int c = Serial.read();
+                if (c >= 0) {
+                    f.write((uint8_t)c);
+                    remaining--;
+                }
+            }
+        }
+        f.close();
+        if (remaining == 0) {
+            Serial.printf("OK: wrote %u bytes to %s\n", (unsigned)size,
+                          path.c_str());
+        } else {
+            Serial.printf("ERR: timeout, %u bytes missing\n",
+                          (unsigned)remaining);
+        }
+    } else if (line.startsWith("FILE_LS ")) {
+        String dir = line.substring(8);
+        File root = LittleFS.open(dir, "r");
+        if (!root || !root.isDirectory()) {
+            Serial.println("ERR: not a directory");
+            return;
+        }
+        File entry;
+        while ((entry = root.openNextFile())) {
+            Serial.printf("%s %s %u\n",
+                          entry.isDirectory() ? "d" : "f",
+                          entry.name(), (unsigned)entry.size());
+            entry.close();
+        }
+        root.close();
+    } else if (line.startsWith("FILE_RM ")) {
+        String path = line.substring(8);
+        if (LittleFS.remove(path)) {
+            Serial.printf("OK: removed %s\n", path.c_str());
+        } else {
+            Serial.printf("ERR: remove failed %s\n", path.c_str());
+        }
+    } else if (line.startsWith("MPY_RUN ")) {
+        // Dev helper: run a LittleFS script without going through the
+        // launcher UI. Dumps any exception traceback to serial.
+        String path = line.substring(8);
+        Serial.printf("MPY_RUN %s\n", path.c_str());
+        bool ok = stick_os::scriptRunFile(path.c_str());
+        Serial.printf("MPY_RUN done: %s\n", ok ? "ok" : "fail");
     }
 }
 

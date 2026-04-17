@@ -13,7 +13,6 @@
 #include <M5StickCPlus2.h>
 #include <stick_net.h>
 #include <stick_os.h>
-#include <micropython_vm.h>
 
 #include "launcher_state.h"
 
@@ -82,23 +81,23 @@ void setup() {
 
     stick_os::fsInit();
 
-    // ---- Phase 2b/2c spike: MPY VM + stick module smoke test ----
-    // Confirms the VM still initialises and that the stick binding
-    // surface is reachable from Python. Remove once ScriptHost (2d)
-    // is running real apps.
-    stick_os::logHeap("mpy-pre");
-    if (MicroPythonVM::init(16 * 1024)) {
-        stick_os::logHeap("mpy-post-init");
-        MicroPythonVM::execStr(
-            "import stick\n"
-            "print('mpy ok, millis =', stick.millis())\n"
-            "stick.delay(50)\n"
-            "print('after delay, millis =', stick.millis())\n"
-            "print('exit flag:', stick.exit())\n"
-        );
-        MicroPythonVM::deinit();
-        stick_os::logHeap("mpy-post-deinit");
-    }
+    // ---- Phase 2d: register a scripted test app ----
+    // Points at /littlefs/demo.py (seed via FILE_PUT serial command).
+    // Lives in Utilities alongside other user-facing apps. Scripted apps
+    // are restricted by app_registry to CAT_GAME / CAT_UTILITY only.
+    // Will be replaced by the LittleFS scan in Task 2e.
+    static const stick_os::AppDescriptor kMpyDemoDesc = {
+        /*id=*/       "mpy_demo",
+        /*name=*/     "MpyDemo",
+        /*version=*/  "0.1.0",
+        /*category=*/ stick_os::CAT_UTILITY,
+        /*flags=*/    stick_os::APP_NONE,
+        /*icon=*/     nullptr,
+        /*runtime=*/  stick_os::RUNTIME_MPY,
+        /*native=*/   { nullptr, nullptr, nullptr, nullptr },
+        /*script=*/   { "/littlefs/demo.py", "main" },
+    };
+    stick_os::registerApp(&kMpyDemoDesc);
 
     stick_os::statusStripInit();
 

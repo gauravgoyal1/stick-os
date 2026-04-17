@@ -65,6 +65,15 @@ const AppDescriptor* findAppById(const char* id) {
 bool registerApp(const AppDescriptor* d) {
     g_staticSealed = true;  // no more static registrations after this
     if (d == nullptr || d->id == nullptr) return false;
+    // Scripted apps are only allowed in user-facing categories. Sensors
+    // and Settings always need OS-internal access (hardware, NVS, OTA),
+    // so they stay native.
+    if (d->runtime == RUNTIME_MPY &&
+        d->category != CAT_GAME && d->category != CAT_UTILITY) {
+        Serial.printf("[stick_os] rejected \"%s\": MPY apps must be "
+                      "CAT_GAME or CAT_UTILITY\n", d->id);
+        return false;
+    }
     if (findAppById(d->id) != nullptr) {
         Serial.printf("[stick_os] duplicate id \"%s\", skipping\n", d->id);
         return false;
