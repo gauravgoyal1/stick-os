@@ -102,9 +102,17 @@ bool showWiFiPicker() {
     d.setCursor(20, 100);
     d.print("Scanning WiFi...");
 
-    // Scan
+    // Scan — retry once if the first call after boot returns 0 while the
+    // radio is still coming up. Use the two-arg disconnect to drop the
+    // AP association without powering the radio off.
     WiFi.mode(WIFI_STA);
+    WiFi.disconnect(false, false);
+    delay(150);
     int scanCount = WiFi.scanNetworks();
+    if (scanCount <= 0) {
+        delay(500);
+        scanCount = WiFi.scanNetworks();
+    }
 
     // Load NVS creds for "known" marking
     WiFiCred nvsCreds[kMaxWiFiNetworks];

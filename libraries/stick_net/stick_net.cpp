@@ -17,27 +17,51 @@ volatile bool   g_ntpSynced = false;
 TaskHandle_t    g_task      = nullptr;
 SemaphoreHandle_t g_mutex   = nullptr;
 
+// Try WiFi.begin + wait for WL_CONNECTED. Disconnects from any prior AP
+// first so the radio is in a clean state before the new attempt.
+static bool tryBeginAndWait(const char* ssid, const char* pass,
+                             int attempts) {
+    Serial.printf("[StickNet] trying: %s\n", ssid);
+    WiFi.disconnect(false, false);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    if (pass && *pass) WiFi.begin(ssid, pass);
+    else               WiFi.begin(ssid);
+    for (int i = 0; i < attempts; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("[StickNet] connected to %s\n", ssid);
+            return true;
+        }
+    }
+    return false;
+}
+
 // Internal — assumes caller already holds g_mutex. Returns WL_CONNECTED.
+//
+// Skips the scan path entirely: after a failed WiFi.begin() the radio
+// commonly reports scanNetworks()==0 even for networks that *are* in
+// range (the picker only finds them after a second rescan). Blindly
+// trying each saved credential avoids that failure mode and is fine
+// for the handful of networks the stick typically has.
 bool connectWiFiLocked() {
     WiFi.mode(WIFI_STA);
 
-    // 1. Try last connected network first
+    stick_os::WiFiCred creds[stick_os::kMaxWiFiNetworks];
+    size_t credCount = stick_os::loadWiFiCreds(creds, stick_os::kMaxWiFiNetworks);
+    if (credCount == 0) {
+        Serial.println("[StickNet] no stored credentials");
+        return false;
+    }
+
     char lastSSID[33] = {0};
-    if (stick_os::getLastConnectedSSID(lastSSID, sizeof(lastSSID)) && lastSSID[0] != '\0') {
-        // Find password for this SSID in NVS
-        stick_os::WiFiCred creds[stick_os::kMaxWiFiNetworks];
-        size_t n = stick_os::loadWiFiCreds(creds, stick_os::kMaxWiFiNetworks);
-        for (size_t i = 0; i < n; i++) {
+    stick_os::getLastConnectedSSID(lastSSID, sizeof(lastSSID));
+
+    // 1. Try the last-connected SSID first (fast path on every subsequent
+    //    boot in a normal home-WiFi setup).
+    if (lastSSID[0] != '\0') {
+        for (size_t i = 0; i < credCount; i++) {
             if (strcmp(creds[i].ssid, lastSSID) == 0) {
-                Serial.printf("[StickNet] trying last: %s\n", lastSSID);
-                WiFi.begin(lastSSID, creds[i].pass);
-                int attempts = 0;
-                while (WiFi.status() != WL_CONNECTED && attempts < 15) {
-                    vTaskDelay(pdMS_TO_TICKS(500));
-                    attempts++;
-                }
-                if (WiFi.status() == WL_CONNECTED) {
-                    Serial.printf("[StickNet] connected to %s\n", lastSSID);
+                if (tryBeginAndWait(creds[i].ssid, creds[i].pass, 20)) {
                     return true;
                 }
                 break;
@@ -45,58 +69,18 @@ bool connectWiFiLocked() {
         }
     }
 
-    // 2. Scan and try known NVS networks
-    int scanCount = WiFi.scanNetworks();
-    if (scanCount <= 0) {
-        Serial.println("[StickNet] no networks visible");
-        return false;
-    }
-
-    stick_os::WiFiCred creds[stick_os::kMaxWiFiNetworks];
-    size_t credCount = stick_os::loadWiFiCreds(creds, stick_os::kMaxWiFiNetworks);
-
-    for (int i = 0; i < scanCount; i++) {
-        String found = WiFi.SSID(i);
-        for (size_t j = 0; j < credCount; j++) {
-            if (found != creds[j].ssid) continue;
-            Serial.printf("[StickNet] trying known: %s\n", creds[j].ssid);
-            WiFi.begin(creds[j].ssid, creds[j].pass);
-            int attempts = 0;
-            while (WiFi.status() != WL_CONNECTED && attempts < 15) {
-                vTaskDelay(pdMS_TO_TICKS(500));
-                attempts++;
-            }
-            if (WiFi.status() == WL_CONNECTED) {
-                stick_os::setLastConnectedSSID(creds[j].ssid);
-                Serial.printf("[StickNet] connected to %s\n", creds[j].ssid);
-                WiFi.scanDelete();
-                return true;
-            }
+    // 2. Retry every stored cred (including the one we just tried —
+    //    the first attempt often fails with cold radio state, a second
+    //    attempt after the disconnect+delay in tryBeginAndWait usually
+    //    succeeds).
+    for (size_t j = 0; j < credCount; j++) {
+        if (tryBeginAndWait(creds[j].ssid, creds[j].pass, 20)) {
+            stick_os::setLastConnectedSSID(creds[j].ssid);
+            return true;
         }
     }
 
-    // 3. Try any open network
-    for (int i = 0; i < scanCount; i++) {
-        if (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) {
-            String openSSID = WiFi.SSID(i);
-            Serial.printf("[StickNet] trying open: %s\n", openSSID.c_str());
-            WiFi.begin(openSSID.c_str());
-            int attempts = 0;
-            while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-                vTaskDelay(pdMS_TO_TICKS(500));
-                attempts++;
-            }
-            if (WiFi.status() == WL_CONNECTED) {
-                stick_os::setLastConnectedSSID(openSSID.c_str());
-                Serial.printf("[StickNet] connected to open: %s\n", openSSID.c_str());
-                WiFi.scanDelete();
-                return true;
-            }
-        }
-    }
-
-    WiFi.scanDelete();
-    Serial.println("[StickNet] all networks failed");
+    Serial.println("[StickNet] all stored networks failed");
     return false;
 }
 
@@ -168,12 +152,19 @@ void startAsync() {
 
 void waitForReady(uint32_t timeoutMs) {
     ensureMutex();
-    // Fast path: nothing to wait on.
-    if (g_stage == STAGE_IDLE || g_stage == STAGE_READY || g_stage == STAGE_FAILED) return;
-    // Acquire the mutex: blocks until the task releases it at the end of
-    // bringUpTask(). That means "bring-up is done" by the time we get it.
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE) {
-        xSemaphoreGive(g_mutex);
+    // Poll g_stage rather than blocking on the mutex — startAsync() can
+    // return before the bringUpTask has had a chance to take the mutex,
+    // in which case a mutex-based wait wins the race and returns
+    // immediately with WiFi still disconnected, spuriously opening the
+    // picker.
+    const uint32_t step = 100;
+    uint32_t elapsed = 0;
+    while (elapsed < timeoutMs) {
+        if (g_stage == STAGE_IDLE ||
+            g_stage == STAGE_READY ||
+            g_stage == STAGE_FAILED) return;
+        vTaskDelay(pdMS_TO_TICKS(step));
+        elapsed += step;
     }
 }
 

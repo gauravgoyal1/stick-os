@@ -66,7 +66,10 @@ void setup() {
         StickCP2.Display.print("Connecting...");
 
         StickNet::startAsync();
-        StickNet::waitForReady(20000);
+        // 30 s gives the last-SSID path (15 s worst case) plus a scan +
+        // retry + another full connect attempt room to complete before
+        // we bail to the manual picker.
+        StickNet::waitForReady(30000);
         bool connected = StickNet::isConnected();
 
         if (!connected) {

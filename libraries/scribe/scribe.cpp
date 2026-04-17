@@ -311,6 +311,11 @@ void drawConnectedScreen() {
 
     // Signal bars
     drawWiFiBars(cx - 6, 156, StickNet::rssi());
+
+    // Button hints
+    StickCP2.Display.setTextColor(C_DARKGRAY);
+    StickCP2.Display.setCursor(4, SCREEN_H - 12);
+    StickCP2.Display.print("A:rec  B:history");
 }
 
 // ==========================================
@@ -583,27 +588,38 @@ static bool httpGet(const String& url, String& out, size_t maxBytes) {
     NetworkClientSecure tls;
     tls.setInsecure();
     HTTPClient http;
-    if (!http.begin(tls, url)) return false;
+    Serial.printf("[Scribe/http] begin %s\n", url.c_str());
+    if (!http.begin(tls, url)) {
+        Serial.println("[Scribe/http] begin failed");
+        return false;
+    }
+    http.setTimeout(10000);
     int code = http.GET();
+    Serial.printf("[Scribe/http] GET -> %d\n", code);
     if (code != 200) { http.end(); return false; }
-    int total = http.getSize();
+    int total = http.getSize();  // Content-Length; -1 when unknown
     WiFiClient* stream = http.getStreamPtr();
     out = "";
     out.reserve(total > 0 && (size_t)total < maxBytes ? total : 4096);
-    uint8_t buf[512];
-    uint32_t deadline = millis() + 30000;
+    char buf[513];
+    uint32_t deadline = millis() + 10000;
     while (millis() < deadline && out.length() < maxBytes) {
+        // Known-length fast path: stop as soon as we have the full body.
+        // Keep-alive means the connection stays open after the response;
+        // without this check, we'd spin until the deadline.
+        if (total > 0 && (int)out.length() >= total) break;
         size_t avail = stream->available();
         if (avail == 0) {
             if (!http.connected() && !stream->available()) break;
             delay(5); continue;
         }
-        size_t want = avail > sizeof(buf) ? sizeof(buf) : avail;
-        int n = stream->readBytes(buf, want);
+        size_t want = avail > sizeof(buf) - 1 ? sizeof(buf) - 1 : avail;
+        int n = stream->readBytes((uint8_t*)buf, want);
         if (n <= 0) break;
         size_t room = maxBytes - out.length();
         size_t take = (size_t)n > room ? room : (size_t)n;
-        for (size_t i = 0; i < take; i++) out += (char)buf[i];
+        buf[take] = '\0';
+        out += buf;
     }
     http.end();
     return out.length() > 0;
@@ -873,11 +889,28 @@ static void drawHistoryText() {
     d.print("A:down B:up PWR:back");
 }
 
+static void drawFetchProgress(const char* label) {
+    auto& d = StickCP2.Display;
+    drawHistoryHeader();
+    // Clear everything from the header down to the bottom edge so the
+    // previous screen's footer ("A:rec B:history") doesn't bleed through.
+    d.fillRect(0, CONTENT_Y + 26, d.width(),
+               d.height() - (CONTENT_Y + 26), C_BLACK);
+    d.setTextSize(1);
+    d.setTextColor(C_CYAN, C_BLACK);
+    d.setCursor(10, CONTENT_Y + 60);
+    d.print(label);
+    d.setTextColor(C_DARKGRAY, C_BLACK);
+    d.setCursor(4, d.height() - 12);
+    d.print("PWR:back");
+}
+
 static void enterHistoryList() {
     g_screen = S_HISTORY_LIST;
     g_historyFetched = false;
-    drawHistoryList();
-    if (!isServerConnected) {
+    drawFetchProgress("Fetching history...");
+
+    if (!StickNet::isConnected()) {
         auto& d = StickCP2.Display;
         d.setTextColor(C_ORANGE, C_BLACK);
         d.setCursor(10, CONTENT_Y + 40);
@@ -885,7 +918,27 @@ static void enterHistoryList() {
         g_historyFetched = true;
         return;
     }
-    if (fetchTranscriptList()) {
+
+    // Free the WebSocket's TLS session before spinning up an HTTPClient —
+    // ESP32 mbedTLS can't reliably keep two independent contexts open on
+    // the ~200 KB free heap we have at scribe launch.
+    uint32_t t0 = millis();
+    Serial.printf("[Scribe/History] heap before close: %u\n",
+                  (unsigned)ESP.getFreeHeap());
+    wsClient.close();
+    isServerConnected = false;
+    delay(100);
+    Serial.printf("[Scribe/History] heap after close:  %u (%ums)\n",
+                  (unsigned)ESP.getFreeHeap(),
+                  (unsigned)(millis() - t0));
+
+    Serial.println("[Scribe/History] fetching /api/transcripts");
+    uint32_t tFetch = millis();
+    bool ok = fetchTranscriptList();
+    Serial.printf("[Scribe/History] fetch %s in %ums\n",
+                  ok ? "ok" : "FAILED",
+                  (unsigned)(millis() - tFetch));
+    if (ok) {
         drawHistoryList();
     } else {
         auto& d = StickCP2.Display;
@@ -899,15 +952,20 @@ static void enterHistoryList() {
 static void enterHistoryText(int idx) {
     if (idx < 0 || idx >= g_historyCount) return;
     g_screen = S_HISTORY_TEXT;
-    auto& d = StickCP2.Display;
-    d.fillRect(0, CONTENT_Y, d.width(), d.height() - CONTENT_Y, C_BLACK);
-    d.setTextColor(C_CYAN, C_BLACK);
-    d.setTextSize(1);
-    d.setCursor(10, CONTENT_Y + 20);
-    d.print("Loading...");
+    drawFetchProgress("Loading transcript...");
 
-    if (!fetchTranscriptBody(g_history[idx])) {
-        d.fillRect(0, CONTENT_Y + 16, d.width(), 16, C_BLACK);
+    uint32_t t0 = millis();
+    Serial.printf("[Scribe/History] loading %s (size=%u)\n",
+                  g_history[idx].name, (unsigned)g_history[idx].size);
+    bool ok = fetchTranscriptBody(g_history[idx]);
+    Serial.printf("[Scribe/History] body %s in %ums (%u chars, %u lines)\n",
+                  ok ? "ok" : "FAILED",
+                  (unsigned)(millis() - t0),
+                  (unsigned)g_textBuffer.length(),
+                  (unsigned)g_lineCount);
+    if (!ok) {
+        auto& d = StickCP2.Display;
+        d.fillRect(0, CONTENT_Y + 16, d.width(), 32, C_BLACK);
         d.setTextColor(C_RED, C_BLACK);
         d.setCursor(10, CONTENT_Y + 20);
         d.print("Fetch failed");
