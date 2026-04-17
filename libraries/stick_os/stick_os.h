@@ -6,6 +6,7 @@
 #include "app_descriptor.h"
 #include "app_registry.h"
 #include "app_context.h"
+#include "app_icon.h"
 #include "stick_store.h"
 #include "stick_fs.h"
 #include "status_strip.h"

@@ -11,8 +11,8 @@
         {
           "name": "main.py",
           "url": "/apps/snake/main.py",
-          "size": 3734,
-          "sha256": "b66b257553e615ed3db329256cb2325cee76ef10dbf2eb59a930b780e46d1ea7"
+          "size": 3554,
+          "sha256": "fae89e8cbd8b29e0708a7ee6dc7a5de3ac822adeebfcf7428abef1dee8725f5d"
         },
         {
           "name": "manifest.json",
@@ -32,8 +32,8 @@
         {
           "name": "main.py",
           "url": "/apps/tilt/main.py",
-          "size": 3619,
-          "sha256": "511e48715008e6ba71728b7b44c641669bbde55b51a6cfdc75ef02901bd8e3f1"
+          "size": 3762,
+          "sha256": "862f8dbc534e6c3c15f48325d56825bca9f8c3cd89b4bce6f72d5bcf561cd0ba"
         },
         {
           "name": "manifest.json",

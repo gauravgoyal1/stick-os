@@ -101,8 +101,8 @@ void drawAppList() {
         if (sel)
             d.fillRoundRect(5, y + 1, d.width() - 10, rowH - 6, 4, bg);
 
-        // Icon
-        if (app->icon) app->icon(10, y + 3, fg);
+        // Icon (letter tile fallback when app has no custom drawer)
+        stick_os::drawAppIconOrFallback(10, y + 3, app, fg);
 
         // Name — 7 chars max at textSize 2 (89px available from x=46)
         d.setTextSize(2);

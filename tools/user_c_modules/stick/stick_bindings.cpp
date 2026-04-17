@@ -31,9 +31,23 @@ extern "C" void stick_bind_delay(uint32_t ms) {
     }
 }
 
-extern "C" bool stick_bind_should_exit(void) {
-    // Poll hardware and latch the exit flag if PWR was pressed.
+// Sticky A/B flags. StickCP2's wasPressed() is only true on the single
+// update that caught the rising edge; a second update within the same
+// frame clears it. Scripts call both stick.exit() and stick.buttons.update()
+// per loop, so we latch presses here and let *_a_pressed()/_b_pressed()
+// consume them.
+static volatile bool g_btnA_latched = false;
+static volatile bool g_btnB_latched = false;
+
+static void pollAndLatchButtons(void) {
+    StickCP2.update();
+    if (StickCP2.BtnA.wasPressed()) g_btnA_latched = true;
+    if (StickCP2.BtnB.wasPressed()) g_btnB_latched = true;
     stick_os::checkAppExit();
+}
+
+extern "C" bool stick_bind_should_exit(void) {
+    pollAndLatchButtons();
     return stick_os::wasExitRequested();
 }
 
@@ -99,15 +113,19 @@ extern "C" void stick_bind_display_text2(const char* s, int x, int y,
 // ---- Buttons ----
 
 extern "C" void stick_bind_buttons_update(void) {
-    stick_os::checkAppExit();   // also polls StickCP2.update() via M5.update()
+    pollAndLatchButtons();
 }
 
 extern "C" bool stick_bind_buttons_a_pressed(void) {
-    return StickCP2.BtnA.wasPressed();
+    bool v = g_btnA_latched;
+    g_btnA_latched = false;
+    return v;
 }
 
 extern "C" bool stick_bind_buttons_b_pressed(void) {
-    return StickCP2.BtnB.wasPressed();
+    bool v = g_btnB_latched;
+    g_btnB_latched = false;
+    return v;
 }
 
 // ---- IMU ----

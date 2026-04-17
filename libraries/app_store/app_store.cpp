@@ -277,19 +277,35 @@ static bool installEntry(const CatalogEntry& e) {
 
 // ---- UI ----
 
+static const uint16_t kAccent = 0x07E5;  // green-ish, Store brand
+
+static bool isInstalled(const char* id) {
+    const stick_os::AppDescriptor* d = stick_os::findAppById(id);
+    return d != nullptr && d->runtime == stick_os::RUNTIME_MPY;
+}
+
+static void drawCheckmark(int x, int y, uint16_t color) {
+    auto& d = StickCP2.Display;
+    // Two-line ✓ inside a 12x12 box.
+    d.drawLine(x + 1, y + 6, x + 4, y + 9, color);
+    d.drawLine(x + 4, y + 9, x + 10, y + 2, color);
+    d.drawLine(x + 1, y + 7, x + 4, y + 10, color);
+    d.drawLine(x + 4, y + 10, x + 10, y + 3, color);
+}
+
 static void drawHeader() {
     auto& d = StickCP2.Display;
     d.fillScreen(BLACK);
     d.setTextSize(2);
-    d.setTextColor(d.color565(0, 200, 100), BLACK);
+    d.setTextColor(kAccent, BLACK);
     d.setCursor(8, 8);
     d.print("Store");
-    d.drawFastHLine(0, 34, d.width(), d.color565(40, 40, 40));
+    d.drawFastHLine(0, 30, d.width(), d.color565(40, 40, 40));
 }
 
 static void drawList() {
     auto& d = StickCP2.Display;
-    d.fillRect(0, 40, d.width(), d.height() - 40 - 28, BLACK);
+    d.fillRect(0, 34, d.width(), d.height() - 34 - 28, BLACK);
     if (g_catalogCount == 0) {
         d.setTextSize(1);
         d.setTextColor(d.color565(120, 120, 120), BLACK);
@@ -297,28 +313,61 @@ static void drawList() {
         d.print("No apps in catalog");
         return;
     }
-    const int rowH = 30;
-    const int firstY = 44;
-    const int maxRows = 6;
+
+    // Match the launcher app-list layout: rowH 38, icon at x=10, name at
+    // size-2 starting x=46, with a checkmark on the right for installed.
+    const int rowH      = 38;
+    const int firstY    = 36;
+    const int maxRows   = 5;
+
     int start = g_cursor - 2;
     if (start < 0) start = 0;
-    if (start > (int)g_catalogCount - maxRows) start = g_catalogCount - maxRows;
+    if (start > (int)g_catalogCount - maxRows)
+        start = (int)g_catalogCount - maxRows;
     if (start < 0) start = 0;
 
     for (int i = 0; i < maxRows && (start + i) < (int)g_catalogCount; i++) {
         const CatalogEntry& e = g_catalog[start + i];
-        bool sel = (start + i) == g_cursor;
-        int y = firstY + i * rowH;
-        uint16_t fg = sel ? d.color565(0, 220, 120) : d.color565(180, 180, 180);
+        const bool sel      = (start + i) == g_cursor;
+        const bool installed = isInstalled(e.id);
+        const int y         = firstY + i * rowH;
+        const uint16_t fg   = sel ? kAccent : d.color565(100, 100, 100);
+        const uint16_t bg   = sel ? d.color565(15, 25, 15) : BLACK;
 
-        d.drawRoundRect(4, y, d.width() - 8, rowH - 4, 3, fg);
-        d.setTextSize(1);
-        d.setTextColor(fg, BLACK);
-        d.setCursor(10, y + 4);
-        d.print(e.name);
-        d.setTextColor(d.color565(120, 120, 120), BLACK);
-        d.setCursor(10, y + 16);
-        d.print(e.version);
+        d.drawRoundRect(4, y, d.width() - 8, rowH - 4, 4, fg);
+        if (sel) d.fillRoundRect(5, y + 1, d.width() - 10, rowH - 6, 4, bg);
+
+        // Icon slot — the catalog doesn't ship custom icons, so we pass
+        // a synthetic descriptor for the letter fallback.
+        stick_os::AppDescriptor tmp = {};
+        tmp.name = e.name;
+        tmp.icon = nullptr;
+        stick_os::drawAppIconOrFallback(10, y + 3, &tmp, fg);
+
+        // Name, 7 chars max at size 2 (89 px from x=46).
+        d.setTextSize(2);
+        d.setTextColor(sel ? WHITE : fg, bg);
+        d.setCursor(46, y + 10);
+        char name[8];
+        strncpy(name, e.name, 7); name[7] = '\0';
+        d.print(name);
+
+        if (installed) {
+            drawCheckmark(d.width() - 18, y + 12, kAccent);
+        }
+    }
+
+    // Scroll indicator
+    if ((int)g_catalogCount > maxRows) {
+        int trackH = maxRows * rowH;
+        int thumbH = (trackH * maxRows) / (int)g_catalogCount;
+        if (thumbH < 8) thumbH = 8;
+        int thumbY = firstY +
+            (trackH - thumbH) * g_cursor / (int)(g_catalogCount - 1);
+        d.fillRect(d.width() - 3, firstY, 2, trackH,
+                   d.color565(30, 30, 30));
+        d.fillRect(d.width() - 3, thumbY, 2, thumbH,
+                   d.color565(80, 80, 80));
     }
 }
 
@@ -327,19 +376,55 @@ static void drawStatus() {
     d.fillRect(0, d.height() - 28, d.width(), 28, BLACK);
     d.setTextSize(1);
     if (g_status.length() > 0) {
-        d.setTextColor(g_statusError ? RED : d.color565(0, 220, 120), BLACK);
+        d.setTextColor(g_statusError ? RED : kAccent, BLACK);
         d.setCursor(6, d.height() - 24);
         d.print(g_status.c_str());
     }
     d.setTextColor(d.color565(80, 80, 80), BLACK);
     d.setCursor(6, d.height() - 12);
-    d.print("A:install  B:next  PWR:back");
+    const char* action = (g_catalogCount > 0 &&
+                          isInstalled(g_catalog[g_cursor].id))
+                         ? "A:uninst" : "A:install";
+    d.printf("%s B:next PWR:back", action);
 }
 
 static void setStatus(const char* msg, bool error = false) {
     g_status = msg;
     g_statusError = error;
     drawStatus();
+}
+
+// Full-screen "Uninstall <name>?  A:yes  B:no" confirm. Blocks until the
+// user chooses; returns true for yes. PWR also counts as no.
+static bool confirmUninstall(const CatalogEntry& e) {
+    auto& d = StickCP2.Display;
+    d.fillScreen(BLACK);
+    d.setTextSize(2);
+    d.setTextColor(RED, BLACK);
+    d.setCursor(8, 30);
+    d.print("Uninstall?");
+    d.setTextSize(1);
+    d.setTextColor(WHITE, BLACK);
+    d.setCursor(8, 64);
+    d.print(e.name);
+    d.setTextColor(d.color565(120, 120, 120), BLACK);
+    d.setCursor(8, 84);
+    d.print("Removes all files");
+    d.setCursor(8, 98);
+    d.print("and uninstalls app.");
+    d.setTextColor(d.color565(80, 80, 80), BLACK);
+    d.setCursor(8, d.height() - 30);
+    d.print("A: yes");
+    d.setCursor(8, d.height() - 16);
+    d.print("B: no  PWR: back");
+
+    while (true) {
+        StickCP2.update();
+        if (stick_os::checkAppExit()) return false;
+        if (StickCP2.BtnA.wasPressed()) return true;
+        if (StickCP2.BtnB.wasPressed()) return false;
+        delay(20);
+    }
 }
 
 void init() {
@@ -362,6 +447,7 @@ void init() {
         setStatus("Catalog unreachable", true);
     }
     drawList();
+    drawStatus();
 
     while (true) {
         StickCP2.update();
@@ -370,16 +456,32 @@ void init() {
         if (StickCP2.BtnB.wasPressed() && g_catalogCount > 0) {
             g_cursor = (g_cursor + 1) % g_catalogCount;
             drawList();
+            drawStatus();
         }
         if (StickCP2.BtnA.wasPressed() && g_catalogCount > 0) {
             const CatalogEntry& e = g_catalog[g_cursor];
-            setStatus((String("Installing ") + e.name).c_str());
-            bool ok = installEntry(e);
-            if (ok) {
-                setStatus((String("Installed ") + e.name).c_str());
+            if (isInstalled(e.id)) {
+                if (confirmUninstall(e)) {
+                    drawHeader();
+                    setStatus((String("Removing ") + e.name).c_str());
+                    bool ok = stick_os::uninstallApp(e.id);
+                    drawList();
+                    setStatus(ok ? (String("Removed ") + e.name).c_str()
+                                 : (String("Remove failed: ") + e.name).c_str(),
+                              !ok);
+                } else {
+                    // Redraw after confirm screen.
+                    drawHeader();
+                    drawList();
+                    drawStatus();
+                }
             } else {
-                setStatus((String("Install failed: ") + e.name).c_str(),
-                          true);
+                setStatus((String("Installing ") + e.name).c_str());
+                bool ok = installEntry(e);
+                drawList();
+                setStatus(ok ? (String("Installed ") + e.name).c_str()
+                             : (String("Install failed: ") + e.name).c_str(),
+                          !ok);
             }
         }
         delay(30);

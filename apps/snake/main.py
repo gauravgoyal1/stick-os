@@ -1,17 +1,27 @@
 # Snake — classic grid snake for Stick OS.
 # Controls: A turns right, B turns left. PWR exits.
 # Target: stick api_version 1.
+#
+# The embed MicroPython build strips most stdlib modules (no `random`,
+# no `time`) and only supports small ints (~30 bits). We mix the
+# millisecond clock into a capped state each call — plenty random for
+# food placement.
 
 import stick
 
-# 9-col x 14-row grid at 15px cells fits 135x222 content area with 12px footer.
 CELL = 15
 COLS = 9
 ROWS = 14
 GRID_Y = 0  # OS content rect already excludes the status strip.
 
-# Directions: (dx, dy) in grid cells. Order matters for turn math.
 DIRS = [(1, 0), (0, 1), (-1, 0), (0, -1)]  # right, down, left, up
+
+_rng = [0]
+
+
+def rand(n):
+    _rng[0] = (_rng[0] + stick.millis() + 31) & 0x3fff
+    return _rng[0] % n
 
 
 def draw_cell(col, row, color):
@@ -21,18 +31,14 @@ def draw_cell(col, row, color):
 
 
 def spawn_food(snake):
-    # Pick a random empty cell. With a 9x14 grid and small snake this
-    # almost always finds one on the first try.
-    import urandom
     while True:
-        c = urandom.getrandbits(4) % COLS
-        r = urandom.getrandbits(4) % ROWS
+        c = rand(COLS)
+        r = rand(ROWS)
         if (c, r) not in snake:
             return (c, r)
 
 
 def draw_score(score, best):
-    # Footer strip below the grid.
     fy = GRID_Y + ROWS * CELL + 2
     stick.display.rect(0, fy, stick.display.width(), 12, stick.BLACK)
     stick.display.text("S:" + str(score) + "  B:" + str(best), 4, fy + 2, stick.WHITE)
@@ -54,12 +60,11 @@ def play_round(best):
     stick.display.fill(stick.BLACK)
 
     snake = [(4, 7), (3, 7), (2, 7)]
-    dir_idx = 0  # moving right
+    dir_idx = 0
     food = spawn_food(snake)
     score = 0
-    step_ms = 180  # speeds up as snake grows
+    step_ms = 180
 
-    # Initial draw.
     for seg in snake:
         draw_cell(seg[0], seg[1], stick.GREEN)
     draw_cell(food[0], food[1], stick.RED)
@@ -69,9 +74,9 @@ def play_round(best):
     while not stick.exit():
         stick.buttons.update()
         if stick.buttons.a_pressed():
-            dir_idx = (dir_idx + 1) % 4   # turn right
+            dir_idx = (dir_idx + 1) % 4
         elif stick.buttons.b_pressed():
-            dir_idx = (dir_idx + 3) % 4   # turn left
+            dir_idx = (dir_idx + 3) % 4
 
         now = stick.millis()
         if now < next_tick:
@@ -82,10 +87,8 @@ def play_round(best):
         dx, dy = DIRS[dir_idx]
         head = (snake[0][0] + dx, snake[0][1] + dy)
 
-        # Wall collision.
         if head[0] < 0 or head[0] >= COLS or head[1] < 0 or head[1] >= ROWS:
             return score
-        # Self collision.
         if head in snake:
             return score
 
@@ -107,6 +110,7 @@ def play_round(best):
 
 
 def main():
+    _rng[0] = stick.millis() | 1  # seed non-zero
     best = int(stick.store.get("best", "0"))
     while not stick.exit():
         score = play_round(best)
@@ -117,7 +121,6 @@ def main():
             stick.store.put("best", str(best))
 
         game_over_screen(score, best)
-        # Wait for A (restart) or PWR (exit).
         while not stick.exit():
             stick.buttons.update()
             if stick.buttons.a_pressed():
