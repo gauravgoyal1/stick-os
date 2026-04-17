@@ -1,2 +1,3 @@
-# Shared Arduino libraries live here.
-# See docs/superpowers/specs/2026-04-14-electronics-lab-restructure-design.md §3.1.
+# Shared Arduino libraries live here — one directory per app, plus
+# stick_os (OS core), micropython_vm (embedded runtime), and
+# stick_net/stick_config for shared wiring.

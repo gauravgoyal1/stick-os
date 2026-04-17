@@ -1,35 +1,26 @@
 # MicroPython apps for Stick OS
 
-Source for Phase 2 scripted apps. Each app is a directory:
+Source for scripted apps. Each app is a directory:
 
 ```
 apps/<id>/
 ├── manifest.json   # id, name, version, entry, api_version, category, heap_budget
-├── main.py         # entry point (compiled to main.mpy at publish time)
+├── main.py         # entry point
 └── icon.bin        # optional 32x32 RGB565 icon (not yet generated)
 ```
 
-At publish time (`tools/publish_app.sh`, not yet built), each directory is:
-1. `mpy-cross main.py` → `main.mpy`
-2. Tar of `manifest.json + main.mpy + icon.bin`
-3. SHA256 + entry added to `stick-catalog/catalog.json`
+## Installing on a device
 
-On the device, the App Store (future) downloads the tar, extracts into
-`/apps/<id>/` on LittleFS, and registers the descriptor via
-`stick_os::registerApp()`.
+Two paths, depending on whether you're iterating or distributing:
 
-## Runtime status
+- **Serial push (dev):** `./tools/push_app.py --port <port> --app apps/<id>` writes the directory to `/apps/<id>/` on LittleFS via the `FILE_PUT` protocol. Reboot (or remove + re-install) so `scanInstalledApps()` picks up the new manifest.
+- **Catalog download (users):** drop the app into `server/storage/apps/<id>/`, add an entry to `server/storage/catalog.json`, and install from **Settings → Store** on the device.
 
-**Not runnable yet.** The MicroPython VM (`libraries/micropython_vm/`) is
-the next Phase 2 gate — until it lands, these `.py` files are reference
-source for the binding surface. The launcher currently shows "Scripted
-apps not yet supported" for any descriptor with `runtime != RUNTIME_NATIVE`.
+Uninstall with `APP_RM <id>` over serial.
 
 ## `stick.*` API surface
 
-These apps target `api_version=1` as defined in
-[docs/superpowers/plans/2026-04-16-stick-os-phase2.md](../docs/superpowers/plans/2026-04-16-stick-os-phase2.md)
-(Task 2c):
+Scripted apps target api_version 1:
 
 ```python
 stick.display.fill(color)
