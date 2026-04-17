@@ -21,6 +21,11 @@ namespace stick_os {
 // Count of apps registered from LittleFS this boot.
 size_t scanInstalledApps();
 
+// Register a single app from its LittleFS directory (/apps/<id>/ with
+// manifest.json). Use after the App Store has written all files. Returns
+// true on success.
+bool registerInstalledApp(const char* dirPath);
+
 // Remove an app by id: unregister, delete /apps/<id>/ recursively,
 // free its heap-allocated descriptor. Returns true on success.
 bool uninstallApp(const char* id);

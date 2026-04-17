@@ -64,7 +64,7 @@ static bool readFile(const char* path, String& out) {
     return true;
 }
 
-static bool registerFromDir(const char* dirPath) {
+bool registerInstalledApp(const char* dirPath) {
     String manifestPath = String(dirPath) + "/manifest.json";
     String body;
     if (!readFile(manifestPath.c_str(), body)) return false;
@@ -143,7 +143,7 @@ size_t scanInstalledApps() {
         if (entry.isDirectory()) {
             String dirPath = String(root) + "/" + entry.name();
             entry.close();
-            if (registerFromDir(dirPath.c_str())) {
+            if (registerInstalledApp(dirPath.c_str())) {
                 n++;
                 Serial.printf("[installer] loaded %s\n", dirPath.c_str());
             }
