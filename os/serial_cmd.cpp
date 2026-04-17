@@ -135,6 +135,13 @@ void processSerialCommand() {
         Serial.printf("MPY_RUN %s\n", path.c_str());
         bool ok = stick_os::scriptRunFile(path.c_str());
         Serial.printf("MPY_RUN done: %s\n", ok ? "ok" : "fail");
+    } else if (line.startsWith("APP_RM ")) {
+        String id = line.substring(7);
+        if (stick_os::uninstallApp(id.c_str())) {
+            Serial.printf("OK: uninstalled %s\n", id.c_str());
+        } else {
+            Serial.printf("ERR: %s not found or busy\n", id.c_str());
+        }
     }
 }
 

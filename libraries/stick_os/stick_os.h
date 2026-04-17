@@ -12,3 +12,4 @@
 #include "wifi_picker.h"
 #include "script_host.h"
 #include "stick_ota.h"
+#include "app_installer.h"

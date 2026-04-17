@@ -82,23 +82,13 @@ void setup() {
 
     stick_os::fsInit();
 
-    // ---- Phase 2d: register a scripted test app ----
-    // Points at /littlefs/demo.py (seed via FILE_PUT serial command).
-    // Lives in Utilities alongside other user-facing apps. Scripted apps
-    // are restricted by app_registry to CAT_GAME / CAT_UTILITY only.
-    // Will be replaced by the LittleFS scan in Task 2e.
-    static const stick_os::AppDescriptor kMpyDemoDesc = {
-        /*id=*/       "mpy_demo",
-        /*name=*/     "MpyDemo",
-        /*version=*/  "0.1.0",
-        /*category=*/ stick_os::CAT_UTILITY,
-        /*flags=*/    stick_os::APP_NONE,
-        /*icon=*/     nullptr,
-        /*runtime=*/  stick_os::RUNTIME_MPY,
-        /*native=*/   { nullptr, nullptr, nullptr, nullptr },
-        /*script=*/   { "/littlefs/demo.py", "main" },
-    };
-    stick_os::registerApp(&kMpyDemoDesc);
+    // ---- Phase 2e: scan LittleFS for installed scripted apps ----
+    // Each /apps/<id>/manifest.json produces a heap-allocated
+    // AppDescriptor registered into the runtime registry. Categories
+    // are clamped to CAT_GAME or CAT_UTILITY by registerApp().
+    size_t mpyCount = stick_os::scanInstalledApps();
+    Serial.printf("[stick] %u scripted app(s) loaded from LittleFS\n",
+                  (unsigned)mpyCount);
 
     stick_os::statusStripInit();
 
