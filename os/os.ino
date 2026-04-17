@@ -40,6 +40,7 @@
 #include <settings_storage.h>
 #include <settings_apps.h>
 #include <settings_time.h>
+#include <settings_update.h>
 
 void setup() {
     StickCP2.begin();

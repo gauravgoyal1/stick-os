@@ -11,3 +11,4 @@
 #include "status_strip.h"
 #include "wifi_picker.h"
 #include "script_host.h"
+#include "stick_ota.h"
